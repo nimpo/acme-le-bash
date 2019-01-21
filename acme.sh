@@ -29,6 +29,8 @@ do
       shift ; chainLocation="$1" ; shift ;;
     -r)
       shift ; rootLocation="$1" ; shift ;;
+    -U)
+      shift ; regenUserKey="YES" ;;
     -u)
       shift ; userPubLocation="$1" ; shift ;;
     -p)
@@ -50,7 +52,8 @@ PEM OUTPUT FILES
  -k <path>, certificate's private key output location.
  -r <path>, root CA output location.
  -p <path>, Authorisation user key output location.
- -u <path>, Authorisation user certificate output location.
+ -u <path>, Authorisation user pubkey output location.
+ -U <path>, Regenerate authorisation user keys even if it exists (as specified by (-p))
 
 WEB CHALLENGES OPTIONS
  -w Will assume a running webserver serving <path>/.well-known/acme-challenge/
@@ -176,9 +179,9 @@ subjectAltName                  = DNS:`echo "${domains[@]}" |sed -e 's/ /,DNS:/g
 issuerAltName                   = email:$emailAddress
 EOF
 
-#---------------------------- Generate CSR, user and domain keys
+#---------------------------- Generate CSR, user and domain keys (generate or use exisiing user key as per option)
 
-openssl genrsa -F4 4096 > user.key 2>/dev/null || exit 1
+if [ "$regenUserKey" ] || [ ! "$userKeyLocation" ] ; then ( umask 0077 ; openssl genrsa -F4 4096 > user.key 2>/dev/null ) || exit 1 ; else cp -p $userKeyLocation user.key ; fi
 openssl rsa -in user.key -pubout > user.pub 2>/dev/null || exit 1
 openssl req -new -config $domains.cnf -keyout $domains.key -out $domains.csr -nodes -batch >/dev/null 2>&1 || exit 1
 
@@ -188,17 +191,35 @@ userJWK='{"e":"AQAB","kty":"RSA","n":"'`openssl rsa -in user.key -noout -modulus
 userJWKDgstB64=`echo -n $userJWK | openssl dgst -binary -sha256 | base64 -w 0 | tr '+/' '-_' | tr -d =`
 headerJSON='{"alg":"RS256","jwk":'$userJWK'}'
 
-####################################################################################
-#---------------------------- Create new-reg and POST is
+#########################################################################################################
+#---------------------------- Create new-reg and POST it if failed new-reg, POST to reg resource returned in Link to see if still valid
+
+#le v1 does not implement {"only-return-existing": true} in case of regJSONB64 construction if userKeyLocation and regenUserKey is not set. So we don't bother here.
 
 termsOfService=`curl -m 5 -s "$acmeServiceURL/directory" | jq -r '.meta."terms-of-service"'` || exit $?
 regJSONB64=`echo -n '{"agreement":"'$termsOfService'","contact":["mailto:'$emailAddress'"],"resource":"new-reg"}' | base64 -w 0 | tr '+/' '-_' | tr -d =`
-regNonce=`curl -m 5 -sI "$acmeServiceURL/directory" | grep '^Replay-Nonce:[[:space:]]*' | sed -e 's/Replay-Nonce:[[:space:]]*//' | tr -cd 'A-Za-z0-9_-'` || exit $?
+regNonce=`curl -m 5 -sI "$acmeServiceURL/directory" | grep '^Replay-Nonce:' | sed -e 's/Replay-Nonce:[[:space:]]*//' | tr -cd 'A-Za-z0-9_-'` || exit $?
 regProtectionJSONB64=`echo -n $headerJSON | sed -e 's/}$/,"nonce":"'$regNonce'"}/' | base64 -w 0 | tr '+/' '-_' | tr -d =`
 regCSRSignatureB64=`echo -n $regProtectionJSONB64.$regJSONB64 | openssl dgst -sha256 -sign user.key | base64 -w 0 | tr '+/' '-_' | tr -d =`
 regJSONPayload='{"header":'$headerJSON',"payload":"'$regJSONB64'","protected":"'$regProtectionJSONB64'","signature":"'$regCSRSignatureB64'"}'
-curl -m 5 -s -o regUserResponse.ret -d "$regJSONPayload" "$acmeServiceURL/acme/new-reg" || exit $?
-cat regUserResponse.ret | jq '.status' | sed -e 's/"\([^"]*\)"/\1/' |grep -q '^valid$' || exit $?
+curl -m 5 -s -o regUserResponse.ret -D regUserResponseHead.ret -d "$regJSONPayload" "$acmeServiceURL/acme/new-reg" || exit $?
+
+if [ ! "$regenUserKey" ] && [ "$userKeyLocation" ] && grep -q '^Location: ' regUserResponseHead.ret
+#if [ "$regenUserKey" ] || [ ! "$userKeyLocation" ] ; then cat regUserResponse.ret | jq '.status' | sed -e 's/"\([^"]*\)"/\1/' | grep -q '^valid$' || exit $?
+#elif grep -q '^Location: ' regUserResponseHead.ret
+then
+  regJSONB64=`echo -n '{"resource":"reg"}' | base64 -w 0 | tr '+/' '-_' | tr -d =`
+  regNonce=`curl -m 5 -sI "$acmeServiceURL/directory" | grep '^Replay-Nonce:' | sed -e 's/Replay-Nonce:[[:space:]]*//' | tr -cd 'A-Za-z0-9_-'` || exit $?
+  regProtectionJSONB64=`echo -n $headerJSON | sed -e 's/}$/,"nonce":"'$regNonce'"}/' | base64 -w 0 | tr '+/' '-_' | tr -d =`
+  regCSRSignatureB64=`echo -n $regProtectionJSONB64.$regJSONB64 | openssl dgst -sha256 -sign user.key | base64 -w 0 | tr '+/' '-_' | tr -d =`
+  regJSONPayload='{"header":'$headerJSON',"payload":"'$regJSONB64'","protected":"'$regProtectionJSONB64'","signature":"'$regCSRSignatureB64'"}'
+  mv regUserResponse.ret regUserResponse.ret.`date +%s`
+  cp regUserResponseHead.ret regUserResponseHead.ret.`date +%s`
+  regURL=`cat regUserResponseHead.ret |grep '^Location: [^[:space:]]*[[:space:]]*$' |sed -e 's/Location: \([^[[:space:]]*\).*/\1/'`
+  curl -m 5 -s -o regUserResponse.ret -D regUserResponseHead.ret -d "$regJSONPayload" $regURL || echo $?
+fi
+
+cat "regUserResponse.ret" | jq '.status' | sed -e 's/"\([^"]*\)"/\1/' |grep -q '^valid$' || exit $?
 
 ##########################################################################################
 #---------------------------- Create Domain new-authz and POST them and prepare challenges
@@ -210,16 +231,16 @@ for domain in ${domains[@]}
 do
 
   domainAuthzJSONB64=`echo -n '{"identifier":{"type":"dns","value":"'$domain'"},"resource":"new-authz"}' | base64 -w 0 | tr '+/' '-_' | tr -d =`
-  domainAuthzNonce=`curl -m 5 -sI "$acmeServiceURL/directory" | grep ^Replay-Nonce:[[:space:]] | sed -e 's/Replay-Nonce:[[:space:]]*//' | tr -cd 'A-Za-z0-9_-'` || exit $?
+  domainAuthzNonce=`curl -m 5 -sI "$acmeServiceURL/directory" | grep '^Replay-Nonce:' | sed -e 's/Replay-Nonce:[[:space:]]*//' | tr -cd 'A-Za-z0-9_-'` || exit $?
   domainAuthzProtectionJSONB64=`echo -n $headerJSON |sed -e 's/}$/,"nonce":"'$domainAuthzNonce'"}/' | base64 -w 0 | tr '+/' '-_' | tr -d =`
   domainAuthzSignatureB64=`echo -n $domainAuthzProtectionJSONB64.$domainAuthzJSONB64 | openssl dgst -sha256 -sign user.key | base64 -w 0 | tr '+/' '-_' | tr -d =`
-  domainAuthzJSONPayload='{"header":'$headerJSON',"payload":"'$domainAuthzJSONB64'i","protected":"'$domainAuthzProtectionJSONB64'","signature":"'$domainAuthzSignatureB64'"}'
+  domainAuthzJSONPayload='{"header":'$headerJSON',"payload":"'$domainAuthzJSONB64'","protected":"'$domainAuthzProtectionJSONB64'","signature":"'$domainAuthzSignatureB64'"}'
   curl -m 5 -s -o "domainAuthzResponse.$domain.ret" -d "$domainAuthzJSONPayload" "$acmeServiceURL/acme/new-authz" || exit $?
-  cat "domainAuthzResponse.$domain.ret" | jq '.status' | sed -e 's/"\([^"]*\)"/\1/' |grep -q '^400$' || exit $?
+  cat "domainAuthzResponse.$domain.ret" | jq '.status' | sed -e 's/"\([^"]*\)"/\1/' |grep -q '^400$' && exit $?
 
   challenges[$domain]=`cat domainAuthzResponse.$domain.ret | jq '.challenges[] | select(.type == "http-01") | .token' | sed -e 's/"\([^"]*\)"/\1/'`
   challengeJSONB64=`echo -n '{"keyAuthorization":"'${challenges[$domain]}.$userJWKDgstB64'","resource": "challenge"}' | base64 -w 0 | tr '+/' '-_' | tr -d =`
-  challengeNonce=`curl -m 5 -sI "$acmeServiceURL/directory" | grep ^Replay-Nonce:[[:space:]] | sed -e 's/Replay-Nonce:[[:space:]]*//' | tr -cd 'A-Za-z0-9_-'` || exit $?
+  challengeNonce=`curl -m 5 -sI "$acmeServiceURL/directory" | grep '^Replay-Nonce:' | sed -e 's/Replay-Nonce:[[:space:]]*//' | tr -cd 'A-Za-z0-9_-'` || exit $?
   challengeProtectionJSONB64=`echo -n $headerJSON |sed -e 's/}$/,"nonce":"'$challengeNonce'"}/' | base64 -w 0 | tr '+/' '-_' | tr -d =`
   challengeSignatureB64=`echo -n $challengeProtectionJSONB64.$challengeJSONB64 | openssl dgst -sha256 -sign user.key | base64 -w 0 | tr '+/' '-_' | tr -d =`
   challengeJSONPayload[$domain]='{"header":'$headerJSON',"payload":"'$challengeJSONB64'","protected":"'$challengeProtectionJSONB64'","signature":"'$challengeSignatureB64'"}'
@@ -252,7 +273,7 @@ else #---------------------------- Domain Challenges in makeshift webserver
   sleep 2 
   sudoPID=`ps --ppid $sudoID -o pid=` 
   nCatID=`ps --pid $sudoPID -C ncat -o pid=` 
-  trap "{ sudo kill $nCatID ; exit 255 ; }" EXIT
+  trap "{ sudo kill $nCatID ; exit 0 ; }" EXIT
 fi
 
 for domain in ${domains[@]}
