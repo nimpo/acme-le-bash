@@ -310,7 +310,7 @@ cSRNonce=`curl -m 5 -sI "$acmeServiceURL/directory" | grep ^Replay-Nonce:[[:spac
 cSRProtectionJSONB64=`echo -n $headerJSON |sed -e 's/}$/,"nonce":"'$cSRNonce'"}/' | base64 -w 0 | tr '+/' '-_' | tr -d =`
 cSRSignatureB64=`echo -n $cSRProtectionJSONB64.$cSRJSONB64 | openssl dgst -sha256 -sign user.key | base64 -w 0 | tr '+/' '-_' | tr -d =`
 cSRJSONPayload='{"header":'$headerJSON',"payload":"'$cSRJSONB64'","protected":"'$cSRProtectionJSONB64'","signature":"'$cSRSignatureB64'"}'
-curl -m 5 -s -H 'Accept: application/pkix-cert' -o cSRResponse.ret -D cSRResponseHead.ret -d "$cSRJSONPayload" "$acmeServiceURL/acme/new-cert" || echo $?
+curl -m 5 -s -H 'Accept: application/pkix-cert' -o cSRResponse.ret -D cSRResponseHead.ret -d "$cSRJSONPayload" "$acmeServiceURL/acme/new-cert" || exit $?
 
 ##########################################################################
 #---------------------------- Check POST response Status and parse headers
@@ -328,7 +328,8 @@ then
     sleep $retry
     mv cSRResponse.ret cSRResponse.ret.`date -r challengeResponse$domain.ret +%s`
     mv cSRResponseHead.ret cSRResponseHead.ret.`date -r challengeResponse$domain.ret +%s`
-    curl -m 5 -s -H 'Accept: application/pkix-cert' -o cSRResponse.ret -D cSRResponseHead.ret "$acmeServiceURL/acme/new-cert" || echo $?
+    curl -m 5 -s -H 'Accept: application/pkix-cert' -o cSRResponse.ret -D cSRResponseHead.ret -d "$cSRJSONPayload" "$acmeServiceURL/acme/new-cert" || exit $?
+#    curl -m 5 -s -H 'Accept: application/pkix-cert' -o cSRResponse.ret -D cSRResponseHead.ret "$acmeServiceURL/acme/new-cert" || echo $?
     sed -i 's/\r$//' cSRResponseHead.ret
     status=`grep '^HTTP/[0-9.]* [1-5][0-9][0-9]\( \|$\)' cSRResponseHead.ret | sed -e '$!d; s/[^ ]*[ ]\([0-9]*\).*/\1/'`
     [ $status -ne 201 ] && [ $status -ne 100 ] && break
