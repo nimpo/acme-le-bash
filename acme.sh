@@ -278,7 +278,8 @@ fi
 
 for domain in ${domains[@]}
 do
-  ! ncat -w2 -z $domain 80 && echo "Failed to connect to $domain:80" >&2 && exit 1
+  ! nc -w2 -z $domain 80 && echo "Failed to connect to $domain:80" >&2 && exit 1
+#  ! ncat -w2 -z $domain 80 && echo "Failed to connect to $domain:80" >&2 && exit 1
   ! curl -m 5 -s http://$domain/.well-known/acme-challenge/${challenges[$domain]} | tr -d '\r' |grep -q "^${challenges[$domain]}.$userJWKDgstB64$" && echo "Wrong Reply from http://$domain/.well-known/acme-challenge/${challenges[$domain]}" >&2 && exit 1
 done
 
