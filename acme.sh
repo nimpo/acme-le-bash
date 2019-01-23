@@ -369,6 +369,6 @@ chmod 0700 backup
 [ "$chainLocation" ]     && cp -p $chainLocation backup/     && cat $domains.cacerts > $chainLocation
 [ "$rootLocation" ]      && cp -p $rootLocation backup/      && cat user.key > $rootLocation
 [ "$userPubLocation" ]   && cp -p $userPubLocation backup/   && cat user.pub > $userPubLocation
-umask=0077
+umask 0077
 [ "$keyLocation" ]       && cp -p $keyLocation backup/       && cat $domains.key > $keyLocation
 [ "$userKeyLocation" ]   && cp -p $userKeyLocation backup/   && cat user.key > $userKeyLocation
