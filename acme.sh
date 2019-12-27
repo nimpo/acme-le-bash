@@ -35,6 +35,8 @@ do
       shift ; userPubLocation="$1" ; shift ;;
     -p)
       shift ; userKeyLocation="$1" ; shift ;;
+    -V)
+      shift ; VERBOSE=1 ;;
     -h|--help)
       cat <<EOF
 
@@ -148,6 +150,7 @@ done
 
 #---------------------------- Do this all in a tempdir
 cd `umask 0077 && mktemp -d acme.XXXX` || exit 1
+[ "$VERBOSE" ] && echo " *** cd-ed to `pwd`" 
 
 #---------------------------- Configs and Defaults
 
@@ -180,34 +183,56 @@ issuerAltName                   = email:$emailAddress
 EOF
 
 #---------------------------- Generate CSR, user and domain keys (generate or use exisiing user key as per option)
+if [ "$regenUserKey" ] || [ ! "$userKeyLocation" ]
+then 
+  [ "$VERBOSE" ] && echo " *** Generating user key"
+  ( umask 0077 ; openssl genrsa -F4 4096 > user.key 2>/dev/null ) || exit 1 
+else
+  [ "$VERBOSE" ] && echo " *** Using pre-existing user key at $userKeyLocation"
+  cp -p $userKeyLocation user.key 
+fi
 
-if [ "$regenUserKey" ] || [ ! "$userKeyLocation" ] ; then ( umask 0077 ; openssl genrsa -F4 4096 > user.key 2>/dev/null ) || exit 1 ; else cp -p $userKeyLocation user.key ; fi
+[ "$VERBOSE" ] && echo " *** Extracting user public key to `pwd`/user.pub"
 openssl rsa -in user.key -pubout > user.pub 2>/dev/null || exit 1
+
+[ "$VERBOSE" ] && echo " *** Generating Domain CSR for $domains"
 openssl req -new -config $domains.cnf -keyout $domains.key -out $domains.csr -nodes -batch >/dev/null 2>&1 || exit 1
+
+[ "$VERBOSE" ] && openssl req -in $domains.csr -noout -text
+
 
 #---------------------------- Get modulus from user public key and armour it; exponent is always 65537 from -F4 option, ie AQAB; Construct headerJSON
 
+[ "$VERBOSE" ] && echo " *** Constructing userJWK, userJWKDgstB64, headerJSON"
 userJWK='{"e":"AQAB","kty":"RSA","n":"'`openssl rsa -in user.key -noout -modulus | sed -e 's/^Modulus=//' | sed -e 's/\(..\)/\\\\\\\\x\1/g' | xargs echo -ne | base64 -w 0 | tr '+/' '-_' | tr -d =`'"}'
 userJWKDgstB64=`echo -n $userJWK | openssl dgst -binary -sha256 | base64 -w 0 | tr '+/' '-_' | tr -d =`
 headerJSON='{"alg":"RS256","jwk":'$userJWK'}'
+[ "$VERBOSE" ] && echo " *** headerJSON=$headerJSON"
 
 #########################################################################################################
 #---------------------------- Create new-reg and POST it if failed new-reg, POST to reg resource returned in Link to see if still valid
 
 #le v1 does not implement {"only-return-existing": true} in case of regJSONB64 construction if userKeyLocation and regenUserKey is not set. So we don't bother here.
 
+[ "$VERBOSE" ] && echo " *** create new-reg and POST it"
 termsOfService=`curl -m 5 -s "$acmeServiceURL/directory" | jq -r '.meta."terms-of-service"'` || exit $?
 regJSONB64=`echo -n '{"agreement":"'$termsOfService'","contact":["mailto:'$emailAddress'"],"resource":"new-reg"}' | base64 -w 0 | tr '+/' '-_' | tr -d =`
 regNonce=`curl -m 5 -sI "$acmeServiceURL/directory" | grep '^Replay-Nonce:' | sed -e 's/Replay-Nonce:[[:space:]]*//' | tr -cd 'A-Za-z0-9_-'` || exit $?
 regProtectionJSONB64=`echo -n $headerJSON | sed -e 's/}$/,"nonce":"'$regNonce'"}/' | base64 -w 0 | tr '+/' '-_' | tr -d =`
 regCSRSignatureB64=`echo -n $regProtectionJSONB64.$regJSONB64 | openssl dgst -sha256 -sign user.key | base64 -w 0 | tr '+/' '-_' | tr -d =`
 regJSONPayload='{"header":'$headerJSON',"payload":"'$regJSONB64'","protected":"'$regProtectionJSONB64'","signature":"'$regCSRSignatureB64'"}'
-curl -m 5 -s -o regUserResponse.ret -D regUserResponseHead.ret -d "$regJSONPayload" "$acmeServiceURL/acme/new-reg" || exit $?
+if [ "$VERBOSE" ]
+then
+  echo " *** POSTING" ; echo "$regJSONPayload" ; echo " *** to $acmeServiceURL/acme/new-reg"
+  curl -v -m 5 -s -o regUserResponse.ret -D regUserResponseHead.ret -d "$regJSONPayload" "$acmeServiceURL/acme/new-reg" || exit $?
+else
+  curl -m 5 -s -o regUserResponse.ret -D regUserResponseHead.ret -d "$regJSONPayload" "$acmeServiceURL/acme/new-reg" || exit $?
+fi
+
 
 if [ ! "$regenUserKey" ] && [ "$userKeyLocation" ] && grep -q '^Location: ' regUserResponseHead.ret
-#if [ "$regenUserKey" ] || [ ! "$userKeyLocation" ] ; then cat regUserResponse.ret | jq '.status' | sed -e 's/"\([^"]*\)"/\1/' | grep -q '^valid$' || exit $?
-#elif grep -q '^Location: ' regUserResponseHead.ret
 then
+  [ "$VERBOSE" ] && echo " *** create new-reg and POST it"
   regJSONB64=`echo -n '{"resource":"reg"}' | base64 -w 0 | tr '+/' '-_' | tr -d =`
   regNonce=`curl -m 5 -sI "$acmeServiceURL/directory" | grep '^Replay-Nonce:' | sed -e 's/Replay-Nonce:[[:space:]]*//' | tr -cd 'A-Za-z0-9_-'` || exit $?
   regProtectionJSONB64=`echo -n $headerJSON | sed -e 's/}$/,"nonce":"'$regNonce'"}/' | base64 -w 0 | tr '+/' '-_' | tr -d =`
@@ -216,9 +241,16 @@ then
   mv regUserResponse.ret regUserResponse.ret.`date +%s`
   cp regUserResponseHead.ret regUserResponseHead.ret.`date +%s`
   regURL=`cat regUserResponseHead.ret |grep '^Location: [^[:space:]]*[[:space:]]*$' |sed -e 's/Location: \([^[[:space:]]*\).*/\1/'`
-  curl -m 5 -s -o regUserResponse.ret -D regUserResponseHead.ret -d "$regJSONPayload" $regURL || echo $?
+  if [ "$VERBOSE" ]
+  then
+    echo " *** POSTING" ; echo "$regJSONPayload" ; echo " *** to $regURL"
+    curl -v -m 5 -s -o regUserResponse.ret -D regUserResponseHead.ret -d "$regJSONPayload" $regURL || echo $?
+  else
+    curl -m 5 -s -o regUserResponse.ret -D regUserResponseHead.ret -d "$regJSONPayload" $regURL || echo $?
+  fi
 fi
 
+[ "$VERBOSE" ] && echo " *** checking for valid response"
 cat "regUserResponse.ret" | jq '.status' | sed -e 's/"\([^"]*\)"/\1/' |grep -q '^valid$' || exit $?
 
 ##########################################################################################
@@ -230,12 +262,20 @@ declare -A challengeURI
 for domain in ${domains[@]}
 do
 
+  [ "$VERBOSE" ] && echo " *** Create Domain $domain new-authz, POST it and prepare challenges"
   domainAuthzJSONB64=`echo -n '{"identifier":{"type":"dns","value":"'$domain'"},"resource":"new-authz"}' | base64 -w 0 | tr '+/' '-_' | tr -d =`
   domainAuthzNonce=`curl -m 5 -sI "$acmeServiceURL/directory" | grep '^Replay-Nonce:' | sed -e 's/Replay-Nonce:[[:space:]]*//' | tr -cd 'A-Za-z0-9_-'` || exit $?
   domainAuthzProtectionJSONB64=`echo -n $headerJSON |sed -e 's/}$/,"nonce":"'$domainAuthzNonce'"}/' | base64 -w 0 | tr '+/' '-_' | tr -d =`
   domainAuthzSignatureB64=`echo -n $domainAuthzProtectionJSONB64.$domainAuthzJSONB64 | openssl dgst -sha256 -sign user.key | base64 -w 0 | tr '+/' '-_' | tr -d =`
   domainAuthzJSONPayload='{"header":'$headerJSON',"payload":"'$domainAuthzJSONB64'","protected":"'$domainAuthzProtectionJSONB64'","signature":"'$domainAuthzSignatureB64'"}'
-  curl -m 5 -s -o "domainAuthzResponse.$domain.ret" -d "$domainAuthzJSONPayload" "$acmeServiceURL/acme/new-authz" || exit $?
+  if [ "$VERBOSE" ]
+  then
+    echo " *** POSTING" ; echo "$domainAuthzJSONPayload" ; echo " *** to $acmeServiceURL/acme/new-authz"
+    curl -v -m 5 -s -o "domainAuthzResponse.$domain.ret" -d "$domainAuthzJSONPayload" "$acmeServiceURL/acme/new-authz" || exit $?
+    echo " *** Check for status != 400 in domainAuthzResponse.$domain.ret"
+  else
+    curl -m 5 -s -o "domainAuthzResponse.$domain.ret" -d "$domainAuthzJSONPayload" "$acmeServiceURL/acme/new-authz" || exit $?
+  fi
   cat "domainAuthzResponse.$domain.ret" | jq '.status' | sed -e 's/"\([^"]*\)"/\1/' |grep -q '^400$' && exit $?
 
   challenges[$domain]=`cat domainAuthzResponse.$domain.ret | jq '.challenges[] | select(.type == "http-01") | .token' | sed -e 's/"\([^"]*\)"/\1/'`
@@ -253,7 +293,11 @@ done
 
 if [ -d "$docRoot" ]
 then #---------------------------- Domain Challenges in existing webserver
-  for domain in ${domains[@]} ; do echo ${challenges[$domain]}.$userJWKDgstB64 > "$docRoot/.well-known/acme-challenge/${challenges[$domain]}" ; done
+  for domain in ${domains[@]}
+  do
+    echo ${challenges[$domain]}.$userJWKDgstB64 > "$docRoot/.well-known/acme-challenge/${challenges[$domain]}"
+    [ "$VERBOSE" ] && echo " *** placing '${challenges[$domain]}.$userJWKDgstB64' into $docRoot/.well-known/acme-challenge/${challenges[$domain]} for http://$domain:80/.well-known/acme-challenge/${challenges[$domain]}"
+  done
 elif [ "$manual" ]
 then
   echo "Place the following in your web server"
@@ -261,6 +305,7 @@ then
   echo "Hit Return when ready."
   read line
 else #---------------------------- Domain Challenges in makeshift webserver
+  [ "$VERBOSE" ] && echo " *** making makeshift webserver callback of at http://$domain:80/.well-known/acme-challenge/${challenges[$domain]} of ${challenges[$domain]}.$userJWKDgstB64"
   for domain in ${domains[@]}
   do
     script=$script'echo "$i"'" |grep -qF 'GET /.well-known/acme-challenge/${challenges[$domain]} ' && /bin/echo -ne 'HTTP/1.1 200 OK\r\nContent-length: `expr ${#challenges[$domain]} + ${#userJWKDgstB64} + 3`\r\n\r\n${challenges[$domain]}.$userJWKDgstB64\r\n' && exit ; "
@@ -278,8 +323,9 @@ fi
 
 for domain in ${domains[@]}
 do
+  [ "$VERBOSE" ] && echo " *** Checking we can reach domain:80"
   ! nc -w2 -z $domain 80 && echo "Failed to connect to $domain:80" >&2 && exit 1
-#  ! ncat -w2 -z $domain 80 && echo "Failed to connect to $domain:80" >&2 && exit 1
+  [ "$VERBOSE" ] && echo " *** Checking we get the correct response"
   ! curl -m 5 -s http://$domain/.well-known/acme-challenge/${challenges[$domain]} | tr -d '\r' |grep -q "^${challenges[$domain]}.$userJWKDgstB64$" && echo "Wrong Reply from http://$domain/.well-known/acme-challenge/${challenges[$domain]}" >&2 && exit 1
 done
 
@@ -288,8 +334,10 @@ done
 
 for domain in ${domains[@]}
 do
+  [ "$VERBOSE" ] && echo " *** Requesting LetsEncrypt to verify our http server for $domain"
   curl -m 5 -s -o challengeResponse$domain.ret -d "${challengeJSONPayload[$domain]}" "${challengeURI[$domain]}" || exit $?
   challengeStatus=`cat challengeResponse$domain.ret | jq '.status' | sed -e 's/"\([^"]*\)"/\1/'`
+  [ "$VERBOSE" ] && echo "status = $challengeStatus"
   for i in 1 2 3 4 5
   do
     [ "$challengeStatus" != "pending" ] && break
@@ -297,6 +345,7 @@ do
     mv challengeResponse$domain.ret challengeResponse$domain.ret.`date -r challengeResponse$domain.ret +%s`
     curl -m 5 -s -o challengeResponse$domain.ret "${challengeURI[$domain]}" || exit $?
     challengeStatus=`cat challengeResponse$domain.ret | jq '.status' | sed -e 's/"\([^"]*\)"/\1/'`
+    [ "$VERBOSE" ] && echo "status try $i = $challengeStatus"
   done
   [ "$challengeStatus" != "valid" ] && echo "Failed to verify $domain" >&2 && exit 1
 done
@@ -310,7 +359,13 @@ cSRNonce=`curl -m 5 -sI "$acmeServiceURL/directory" | grep ^Replay-Nonce:[[:spac
 cSRProtectionJSONB64=`echo -n $headerJSON |sed -e 's/}$/,"nonce":"'$cSRNonce'"}/' | base64 -w 0 | tr '+/' '-_' | tr -d =`
 cSRSignatureB64=`echo -n $cSRProtectionJSONB64.$cSRJSONB64 | openssl dgst -sha256 -sign user.key | base64 -w 0 | tr '+/' '-_' | tr -d =`
 cSRJSONPayload='{"header":'$headerJSON',"payload":"'$cSRJSONB64'","protected":"'$cSRProtectionJSONB64'","signature":"'$cSRSignatureB64'"}'
-curl -m 5 -s -H 'Accept: application/pkix-cert' -o cSRResponse.ret -D cSRResponseHead.ret -d "$cSRJSONPayload" "$acmeServiceURL/acme/new-cert" || exit $?
+if [ "$VERBOSE" ]
+then
+  echo " *** POST CSR for signing"
+  curl -v -m 5 -s -H 'Accept: application/pkix-cert' -o cSRResponse.ret -D cSRResponseHead.ret -d "$cSRJSONPayload" "$acmeServiceURL/acme/new-cert" || exit $?
+else
+  curl -m 5 -s -H 'Accept: application/pkix-cert' -o cSRResponse.ret -D cSRResponseHead.ret -d "$cSRJSONPayload" "$acmeServiceURL/acme/new-cert" || exit $?
+fi
 
 ##########################################################################
 #---------------------------- Check POST response Status and parse headers
@@ -328,8 +383,13 @@ then
     sleep $retry
     mv cSRResponse.ret cSRResponse.ret.`date -r challengeResponse$domain.ret +%s`
     mv cSRResponseHead.ret cSRResponseHead.ret.`date -r challengeResponse$domain.ret +%s`
-    curl -m 5 -s -H 'Accept: application/pkix-cert' -o cSRResponse.ret -D cSRResponseHead.ret -d "$cSRJSONPayload" "$acmeServiceURL/acme/new-cert" || exit $?
-#    curl -m 5 -s -H 'Accept: application/pkix-cert' -o cSRResponse.ret -D cSRResponseHead.ret "$acmeServiceURL/acme/new-cert" || echo $?
+    if [ "$VERBOSE" ]
+    then
+      echo " *** retry POST CSR for signing"
+      curl -v -m 5 -s -H 'Accept: application/pkix-cert' -o cSRResponse.ret -D cSRResponseHead.ret -d "$cSRJSONPayload" "$acmeServiceURL/acme/new-cert" || exit $?
+    else
+      curl -m 5 -s -H 'Accept: application/pkix-cert' -o cSRResponse.ret -D cSRResponseHead.ret -d "$cSRJSONPayload" "$acmeServiceURL/acme/new-cert" || exit $?
+    fi
     sed -i 's/\r$//' cSRResponseHead.ret
     status=`grep '^HTTP/[0-9.]* [1-5][0-9][0-9]\( \|$\)' cSRResponseHead.ret | sed -e '$!d; s/[^ ]*[ ]\([0-9]*\).*/\1/'`
     [ $status -ne 201 ] && [ $status -ne 100 ] && break
@@ -342,6 +402,9 @@ certLocationURI=`grep '^Location:[[:space:]]' cSRResponseHead.ret | sed -e 's/Lo
 cALocationURI=`grep '^Link:[[:space:]]*<[]a-zA-Z0-9_.~!*'"'"'();:@&=+$,\/?#[-]*>[[:space:]]*;[[:space:]]*rel="up"' cSRResponseHead.ret |sed -e 's/Link:[[:space:]]*<\([]a-zA-Z0-9_.~!*'"'"'();:@&=+$,\/?#[-]*\)>.*/\1/'`
 openssl x509 -in cSRResponse.ret -inform DER > $domains.crt
 
+
+[ "$VERBOSE" ] && echo " *** Certificate received ... " && openssl x509 -in $domains.crt -noout -text
+
 ##################################################################################
 #---------------------------- Try again to get certificate -- do we need this (no)
 #
@@ -351,16 +414,20 @@ openssl x509 -in cSRResponse.ret -inform DER > $domains.crt
 #---------------------------- If Link "up" in header, get CA certificate
 # Assume only one intermediate for now
 
+[ "$VERBOSE" ] && echo " *** Getting Intermediate CAs"
 [ "$cALocationURI" ] && curl -s -H 'Accept: application/pkix-cert' -o cacert.der "$cALocationURI" && openssl x509 -in cacert.der -inform DER > $domains.cacerts
 
 ############################################
 #---------------------------- Obtain Root CA
 # From known authoirative source
 
+[ "$VERBOSE" ] && echo " *** Getting Root CA"
 curl -m 5 -s -H 'Accept: application/pkix-cert' -o caroot.der $rootCAURL
 openssl x509 -in caroot.der -inform DER > caroot.crt
 ln -s caroot.crt `openssl x509 -in caroot.crt -noout -hash`.0
 
+
+[ "$VERBOSE" ] && echo " *** Creating backup `pwd`/backup and writing new certs in place as specified"
 mkdir backup
 chmod 0700 backup
 [ "$certLocation" ]      && cp -p $certLocation backup/      && cat $domains.crt > $certLocation
