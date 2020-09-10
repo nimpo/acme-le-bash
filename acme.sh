@@ -102,7 +102,7 @@ EOF
     -*)
       error="Unknown option $1; $error" ; shift ;;
     *)
-      if echo "$1" | grep -q '^[a-z][a-z0-9_-]*\.[a-z0-9][a-z0-9_.-]*$' ; then  domains+=($1) ; else error="Expecting FQDM or option flag, got '$1'; $error" ; fi ; shift ;;
+      if echo "$1" | grep -q '^[a-z0-9][a-z0-9_-]*\.[a-z0-9][a-z0-9_.-]*$' ; then  domains+=($1) ; else error="Expecting FQDN or option flag, got '$1'; $error" ; fi ; shift ;;
   esac
 done
 
