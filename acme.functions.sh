@@ -19,13 +19,14 @@ function checkNBale () {
 }
 
 function checkCommands () { #Quick check for all commands
-  for command in jq openssl curl grep /bin/echo mktemp uname sudo tr ln chmod sed bash cat xargs base64 $@
+  for command in $@
   do
     which "$command" |grep -q '^\(\.\|\)*/' || ERRORS+=("This script requires the $command command")
   done
   [ ${#ERRORS[@]} -gt 0 ] && exit 1
 }
-checkCommands
+
+checkCommands jq openssl curl grep /bin/echo mktemp uname sudo tr ln chmod sed bash cat xargs base64
 
 function errorIn () { #add argument ERRORS array
   [ "$1" ] && ERRORS+=$@ ; return

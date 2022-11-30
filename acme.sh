@@ -13,19 +13,32 @@ do
   case "$1" in
     -e)
       shift ; emailAddress="$1" ; shift ;;
-    -w)
-      shift ; docRoot="$1" 
-      [ "$useDNS" -o "$nCat" ] && errorIn "Can only specify one of _docRoot_ (-w), nCat (-n), useDNS (-D) options" ; shift ;;
+    -w) 
+      warningIn "-w <path> is now -HDocRoot <path>" ; shift ; set - "-HDocRoot" "$@" ;;
     -d)
       shift ; dryRun='YES' ;;
     -v)
       shift ; set -v ;;
     -n)
-      shift ; nCat='YES'
-      [ "$useDNS" -o "$docRoot" ] && errorIn "Can only specify one of docRoot (-w), _nCat_ (-n), useDNS (-D) options" ;;
-    -D*) 
-      [ $1 = "-DAWS" ] && useDNS="AWS" || useDNS="manual" ; shift 
-      [ "$docRoot" -o "$nCat" ] && errorIn "Can only specify one of docRoot (-w), nCat (-n), _useDNS_ (-D) options" ;;
+      warningIn "-n is now -Hnc" ; shift ; set - "-Hnc" "$@" ;;
+    -DAWS) # Use DNS with nest arg 
+      checkCommands aws
+      [ "$method" ] && errorIn "Can only specify one challenge type" ; method="DNS-01:AWS" ; shift
+      useDNS="AWS" ; case $1 in -*) ;; *) AWSProfile="default" ;; esac ;;
+    -D)
+      [ "$method" ] && errorIn "Can only specify one challenge type" ; method="DNS-01:manual" ; shift
+      useDNS="manual"
+      ;;
+    -Hnc)
+      [ "$method" ] && errorIn "Can only specify one challenge type" ; method="HTTP-01:nCat" ; shift
+      useHTTP="nCat" ; nCat='YES' ;;
+    -HDocRoot)
+      [ "$method" ] && errorIn "Can only specify one challenge type" ; method="HTTP-01:DocRoot" ; shift
+      case $1 in -*) errorIn "Method $method requires an argument." ;; *) docRoot="$1" ; shift ;; esac
+      useHTTP="DocRoot" ; shift ;;
+    -H)
+      [ "$method" ] && errorIn "Can only specify one challenge type" ; method="HTTP-01:manual" ; shift
+      useHTTP="manual" ;;
     -c)
       shift ; certLocation="$1" ; shift ;;
     -C)
@@ -49,7 +62,7 @@ do
     -h|--help)
       cat <<EOF
 
-Usage: $0 [-e <emailAddress>] [-w <path>|-n] [-d] [-h] [-v] [-a|c|C|k|p|u <path>]* <FQDN> <SAN> ...
+Usage: $0 [-e <emailAddress>] [-H|-D]{see below} [-d] [-h] [-v] [-a|c|C|k|p|u <path>]* <FQDN> <SAN> ...
 
  -d Dry run, contacts LE staging server.
  -e If emailAddress is not specified will use webmaster@FQDN.
@@ -57,11 +70,12 @@ Usage: $0 [-e <emailAddress>] [-w <path>|-n] [-d] [-h] [-v] [-a|c|C|k|p|u <path>
  -v some kind of verbose (set -v)
 
 PEM/Token OUTPUT FILES
- -a <path>, intermediate CA chain output location.
- -c <path>, certificate output location.
- -C <path>, certificate and intermediate CA chain combined output location.
- -k <path>, certificate's private key output location.
- -r <path>, root CA output location.
+ ## Removed options : -a <path>, intermediate CA chain output location.
+ ## Temporarily Removed option: -c <path>, certificate output location.
+ ## Temporarily Removed option: -C <path>, certificate and intermediate CA chain combined output location.
+ ## Temporarily Removed option: -k <path>, certificate's private key output location.
+ ## Temporarily Removed option: -r <path>, root CA output location.
+ >> Temporarily find 2 of abouve outputs in new acme.???? temp directory: DOMAIN.crt (-C) DOMAIN.key 
  -p <path>, Authorisation user key output/reuse location.
  -u <path>, Authorisation user pubkey output/reuse location.
  -j <path>, Authorisation user KID Token output/reuse location.
@@ -72,18 +86,28 @@ CHALLENGES OPTIONS
     as /.well-known/acme-challenge/ for all FQAN and SANs. This script will need
     write access to this directory.
  -n Will attempt to run ncat server on port 80 via sudo.
- If neither -w nor -n options the script will list the URLs and corresponding
- contents required as part of the http challenge response and wait for
- confirmation to continue.
 
-  -D use DNS-01 validation
-  -DAWS use AWS's Route53
+ -H... options use HTTP-01 profile:
+   -HDocRoot <path>, will add tokens to <path>/.well-known/acme-challenge/
+                     (i.e. assumes a running webserver on port 80).
+   -Hnc,             Attempts to set up simple tcp server on port 80 that respondes to HTTP-01 callback
+                     (requires sudo).
+   -Hmanual,         Spits HTTP-01 token out to terminal and lets you find a way to host it.
+ -D... options use DNS-01:
+ -DAWS [profile],    Uses aws cli to update DNS record hosted in Route53.
+                     (Optionally specify an AWS profile (default is "default"!))
+ -Dmanual            Spits DNS-01 token out to terminal and lets you find a way to update TXT record.
+
+ -w <path>,          Derpicated === -HDocRoot <path>
+ -n,                 Depricated === -Hnc
 
 ABOUT
   This executable provides a basic client to the LetsEncrypt service endpoint
-  https://acme-v01.api.letsencrypt.org
+
+  https://acme-v02.api.letsencrypt.org
   or it's staging service
-  https://acme-staging.api.letsencrypt.org (-d).
+  https://acme-staging.api.letsencrypt.org
+  https://acme-staging-v02.api.letsencrypt.org (-d option)
   The purpose of writing this script was mainly to learn about the ACME protocol.
   Its usefulness in a production environment may therefore be limited.
 
@@ -104,6 +128,7 @@ LICENCE
   limitations under the License.
 
 SEE ALSO
+  https://www.rfc-editor.org/rfc/rfc8555 [Accessed 2022-11-31]
   https://tools.ietf.org/html/draft-ietf-acme-acme-07 [Accessed 2019-01-19]
   https://github.com/letsencrypt/boulder/blob/master/docs/acme-divergences.md [Accessed 2019-01-19]
 
@@ -126,8 +151,6 @@ done
 #---------------------------- Get DNS Zone Roots --- used in dns-01
 if [ "$useDNS" ]
 then
-  ARN=`aws --profile "$AWSProfile" --output json sts get-caller-identity|jq -r .Arn` || errorIn "Cannot talk to AWS"
-  verbose "Assuming AWS ARN: $ARN"
   declare -A Zones=()
   declare -A ZoneIDs=()
   for domain in ${domains[@]}
@@ -139,8 +162,11 @@ then
       D=`echo "$D"|sed -e 's/^[a-z0-9-]*\.//'`
     done
   done
-  if [ "$useDNS" = "AWS" ]
+  if [ "$method" = "DNS-01:AWS" ]
   then
+    ARN=`aws --profile "$AWSProfile" --output json sts get-caller-identity|jq -r .Arn` || errorIn "Cannot talk to AWS"
+    verbose "Assuming AWS ARN: $ARN"
+    checkNBale
     for zoneRoot in "${!ZoneIDs[@]}"
     do
       ZoneIDs[$zoneRoot]=`aws --profile "$AWSProfile" --output json route53 list-hosted-zones-by-name --dns-name "$zoneRoot" | jq -r '.HostedZones[0].Id' |sed -e 's#^/hostedzone/\([A-Z0-9]*\).*$#\1#' | grep '^[A-Z0-9]\{1,\}$'` # That RE is a guess Can't find AWS spec
@@ -195,7 +221,7 @@ checkNBale
 generateCSR "$domains" || errorIn "Unable to generate CSR for $domains"
 checkNBale
 
-[ "$VERBOSE" ] && openssl req -in $domains.csr -noout -text
+#[ "$VERBOSE" ] && openssl req -in $domains.csr -noout -text
 
 #---------------------------------------------------------------------- Now we talk to Acme
 # First probe service to get endpoints:
@@ -299,7 +325,7 @@ done
 ######################################################################
 #----------------------------------- Pop those tokens in!
 JWKDgstB64=`genJWK user.key |Dgst |B64`
-if [ "$docRoot" ] 
+if [ "$method" = "HTTP-01:DocRoot" ] 
 then
   verbose "doing local running webserver route" 
   ! [ -d "$docRoot" ] && errorIn "No docRoot to write to" 
@@ -309,7 +335,7 @@ then
     echo "${HTTPToken[$domain]}.$JWKDgstB64" > "$docRoot/.well-known/acme-challenge/${HTTPToken[$domain]}"
   done
   # taken out ncat and manual for the moment (see earlier versions for code)
-elif [ "$nCat" ]
+elif [ "$method" = "HTTP-01:nCat" ]
 then
   verbose "making makeshift nCat webserver callback"
   script=""
@@ -326,16 +352,16 @@ then
   sudoPID=`ps --ppid $sudoID -o pid=`
   nCatID=`ps --pid $sudoPID -C ncat -o pid=`
   trap "{ sudo kill $nCatID ; exit 0 ; }" EXIT
-elif [ "$useDNS" = "AWS" ]
+elif [ "$method" = "DNS-01:AWS" ]
 then                        # TXT in _acme-challenge.<YOUR_DOMAIN> ""
   batch='{"Comment":"ACME Upsert","Changes":['
   declare -A zoneChanges=()
   for domain in ${domains[@]}
   do
-    verbose "adding http://$domain:80/.well-known/acme-challenge/${HTTPToken[$domain]} to makeshift nCat server"
+    Token=`echo -n "${DNSToken[$domain]}.$JWKDgstB64" |Dgst |B64`
+    verbose "Asking AWS to add the following DNS record:" "_acme-challenge.$domain 5 IN TXT \"9RqsiQvYBh0dhqw90lvkj84jAuveuPG14iyklQwr-NI\"" 
   # lookup ZoneIDs
     zoneID="${ZoneIDs["${Zones[$domain]:-"X"}"]}" # Nested lookup we use substitute X to avoid unredirectable error
-    Token=`echo -n "${DNSToken[$domain]}.$JWKDgstB64" |Dgst |B64`
     [ "$zoneID" = "" ] && errorIn "Failed to lookup AWS ZoneId for $domain" continue
     zoneChanges["$zoneID"]=${zoneChanges["$zoneID"]}'{"Action":"UPSERT","ResourceRecordSet":{"Name":"_acme-challenge.'$domain'","Type":"TXT","TTL":5,"ResourceRecords":[{"Value":"\"'$Token'\""}]}},'
   done
@@ -364,20 +390,20 @@ then                        # TXT in _acme-challenge.<YOUR_DOMAIN> ""
     sleep $i
   done
   ! [ "$GGLDNS" ] && i=${DNSWait:-60} ; verbose "Extra sleep $i seconds as cannot reach 8.8.8.8 here" && while [ $i -gt 0 ] ; do [ "$VERBOSE" ] && echo -n . ; sleep 1 ; let i-- ; done ; [ "$VERBOSE" ] && echo
-elif [ "$useDNS" ]
+elif [ "$method" = "DNS-01:manual" ]
 then
   verbose "do manual DNS-01 route not implemented yet"
 # TBA
   exit
-else # elif [ "$manual" ]
-#then
+elif [ "$method" = "HTTP-01:manual" ]
+then
   verbose "doing manual HTTP-01 webserver route"
   echo "Place the following in your web server"
   for domain in ${domains[@]} ; do echo echo ${HTTPToken[$domain]}.$JWKDgstB64 \> http://$domain:80/.well-known/acme-challenge/${HTTPToken[$domain]} ; done
   echo "Hit Return when ready."
   read line
-#else
-#  errorIn "No method for callback"
+else
+  errorIn "No method for callback"
 fi
 checkNBale
 
