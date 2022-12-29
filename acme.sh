@@ -185,8 +185,8 @@ fi
 rm -f awsapi-$$.ret awsapi-$$.err
 checkNBale
 
-#---------------------------- Reuseable KID Token needed if reusing user.key
-[ "$userKeyLocation" ] && ! [ "$userKIDLocation" ] && errorIn "KID required if using KeyLocation"
+#---------------------------- KID Token location (for account URI) needed if specifying Key Location
+[ "$userKeyLocation" ] && ! [ "$userKIDLocation" ] && errorIn "userKIDlocation (-j) required if using userKeyLocation (-p)"
 
 #---------------------------- Check paths to cert and key locations are writable (non-atomic)
 for outfile in $certLocation $certChainLocation $keyLocation $chainLocation $userPubLocation $userKeyLocation $userKIDLocation
