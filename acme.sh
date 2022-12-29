@@ -218,8 +218,8 @@ rootCAURL='https://cert.root-x1.letsencrypt.org/'
 #---------------------------- Endpoints for ACME v2
 acmeServiceURL='https://acme-v02.api.letsencrypt.org'
 [ "$dryRun" = "YES" ] && acmeServiceURL='https://acme-staging-v02.api.letsencrypt.org'
-rootCAURL='https://cert.root-x1.letsencrypt.org/---'
-[ "$dryRun" ] && rootCAURL='https://cert.stg-root-x1.letsencrypt.org/'
+rootCAURL='https://letsencrypt.org/certs/isrgrootx1.pem'
+[ "$dryRun" ] && rootCAURL='https://letsencrypt.org/certs/staging/letsencrypt-stg-root-x1.pem'
 #####Fixme
 
 #---------------------------- SSL Config file
