@@ -247,7 +247,8 @@ directory[revokeCert]=`jq -r '.revokeCert' Response.ret |filterHTTP`
 [ "${directory[termsOfService]}" ] && curl -m 5 -s -O "${directory[termsOfService]}"
 
 #--------------------------------------- Agree to terms and create an Account (new get KID) Or use previous user.key and KID
-if [ "$regenUserKey" ] || [ ! "$userKeyLocation" ] # If need to create a new account then
+
+if [ "$regenUserKey" ] || [ ! "$userKeyLocation" ] || [ ! -e "$userKeyLocation" ] # If need to create a new account then
 then
   verbose "Agreeing to terms and getting AuthZ"
   genRSAKey user.key || errorIn "Unable to generate user.key"
@@ -266,11 +267,14 @@ then
   if [ "$userKeyLocation" ] # If user.key (and user.kid see earlier check) are supposed to be stored elsewhere on system 
   then
     DATE=`date +%s`
-    mv "$userKeyLocation" "$userKeyLocation.$DATE"
-    mv "$userKIDLocation" "$userKIDLocation.$DATE"
+    [ -e "$userKeyLocation" ] && mv "$userKeyLocation" "$userKeyLocation.$DATE"
+    [ -e "$userKIDLocation" ] && mv "$userKIDLocation" "$userKIDLocation.$DATE"
     cp -p user.key "$userKeyLocation" || errorIn "Cannot Copy user.key to $userKeyLocation"
     cp -p user.kid "$userKIDLocation" || errorIn "Cannot Copy user.kid to $userKIDLocation"
   fi
+elif [ "$userKeyLocation" ] || [ ! -e "$userKIDLocation" ]
+then
+  errorIn "If importing old user.key then user.kid is also required."
 else
   verbose " *** Using pre-existing user key at $userKeyLocation"
   cp -p "$userKeyLocation" user.key || errorIn "unable to copy $userKeyLocation to ./user.key"
@@ -278,6 +282,7 @@ else
   KID=`cat user.kid`
   JWK='{"alg":"RS256","kid":"'$KID'"}'
 fi
+checkNBale
 
 #exit
 #################################################################################################################################
