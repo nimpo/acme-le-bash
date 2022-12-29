@@ -188,10 +188,11 @@ checkNBale
 #---------------------------- KID Token location (for account URI) needed if specifying Key Location
 [ "$userKeyLocation" ] && ! [ "$userKIDLocation" ] && errorIn "userKIDlocation (-j) required if using userKeyLocation (-p)"
 
-#---------------------------- Check paths to cert and key locations are writable (non-atomic)
+#---------------------------- Check paths to cert and key locations are writable (non-atomic) if specified
 for outfile in $certLocation $certChainLocation $keyLocation $chainLocation $userPubLocation $userKeyLocation $userKIDLocation
 do
-  echo "$outfile" | checkFile || errorIn "Cannot write to $outfile"
+  checkFile "$outfile" || errorIn "Cannot write to $outfile"
+#  echo "$outfile" | checkFile || errorIn "Cannot write to $outfile"
 done
 
 #---------------------------- Check I can put a token in docroot
