@@ -37,9 +37,8 @@ function warningIn () {
   [ "$1" ] && printf "Warning: %s\n" "$@" >&2 ; return
 }
 
-function verbose () { # echos arguments or reveals stdout if VERBOSE is set
+function verbose () { # echos arguments if VERBOSE is set
   [ "$VERBOSE" ] && [ "$1" ] && printf " *** %s\n" "$@"
-  [ "$VERBOSE" ] && ! [ -t 1 ] && cat | sed -e 's/^/ *** /'
   return 0
 }
 
