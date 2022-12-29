@@ -368,25 +368,43 @@ then
   nCatID=`ps --pid $sudoPID -C ncat -o pid=`
   trap "{ sudo kill $nCatID ; exit 0 ; }" EXIT
 elif [ "$method" = "DNS-01:AWS" ]
-then                        # TXT in _acme-challenge.<YOUR_DOMAIN> ""
+then                        # TXT in _acme-challenge.<YOUR_DOMAIN> "..."
+  #--------------------------------------------Ask AWS to make changes one zone at a time. Assumes only one AWS account easier to get separate certs for separate Zones even!
   batch='{"Comment":"ACME Upsert","Changes":['
   declare -A zoneChanges=()
   for domain in ${domains[@]}
   do
     Token=`echo -n "${DNSToken[$domain]}.$JWKDgstB64" |Dgst |B64`
-    verbose "Asking AWS to add the following DNS record:" "_acme-challenge.$domain 5 IN TXT \"9RqsiQvYBh0dhqw90lvkj84jAuveuPG14iyklQwr-NI\"" 
+    verbose "Asking AWS to add the following DNS record:" "_acme-challenge.$domain 5 IN TXT \"$Token\"" 
   # lookup ZoneIDs
     zoneID="${ZoneIDs["${Zones[$domain]:-"X"}"]}" # Nested lookup we use substitute X to avoid unredirectable error
-    [ "$zoneID" = "" ] && errorIn "Failed to lookup AWS ZoneId for $domain" continue
+    [ "$zoneID" = "" ] && errorIn "Failed to lookup AWS ZoneId for $domain" && continue
     zoneChanges["$zoneID"]=${zoneChanges["$zoneID"]}'{"Action":"UPSERT","ResourceRecordSet":{"Name":"_acme-challenge.'$domain'","Type":"TXT","TTL":5,"ResourceRecords":[{"Value":"\"'$Token'\""}]}},'
   done
   checkNBale
   for zoneChange in ${!zoneChanges[@]} ##################################
   do 
     batch='{"Comment":"ACME Upsert for '$zoneChange'","Changes":['`echo "${zoneChanges[$zoneChange]}" | sed -e 's/,$/]}/'`
-    aws route53 change-resource-record-sets --hosted-zone-id "$zoneChange" --change-batch "$batch" |grep -q PENDING || errorIn "Unable to make change-resource-record-set(s)"
+#ZoneIDs[$zoneRoot]=`aws --profile "$AWSProfile" --output json route53 list-hosted-zones-by-name --dns-name "$zoneRoot" | jq -r '.HostedZones[0].Id' |sed -e 's#^/hostedzone/\([A-Z0-9]*\).*$#\1#' | grep '^[A-Z0-9]\{1,\}$'` # That RE is a guess Can't find AWS spec
+#    aws route53 change-resource-record-sets --hosted-zone-id "$zoneChange" --change-batch "$batch" |grep -q PENDING || errorIn "Unable to make change-resource-record-set(s)"
+    aws --profile "$AWSProfile" --output json route53 change-resource-record-sets --hosted-zone-id "$zoneChange" --change-batch "$batch" > zoneChange.tmp
+    ID=`jq -r .ChangeInfo.Id zoneChange.tmp |grep '^/change/[A-Z0-9]*$' | sed -e 's#/change/##'`
+    Status=`jq -r .ChangeInfo.Status zoneChange.tmp`
+    while [ "$Status" = "PENDING" ]
+    do
+      verbose "Change DNS record for $zoneChange is $Status"
+      sleep 1
+      Status=`aws --profile "$AWSProfile" --output json route53 get-change --id "$ID" |jq -r .ChangeInfo.Status`
+    done
+    verbose "Change DNS record for $zoneChange is $Status"
+    [ "$Status" != "INSYNC" ] && errorIn "Change DNS record for $zoneChange failed."
   done
+  checkNBale
+
   verbose "Check I can reach 8.8.8.8 for DNS query"
+
+# At this point AWS has queued a change
+
   dig @8.8.8.8 letsencrypt.org +tries=1 +time=5 >/dev/null 2>&1 && GGLDNS="yes"
   i=1
   for j in 1 2 4 8 16 32 64 128 256
