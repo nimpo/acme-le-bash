@@ -42,29 +42,29 @@ do
       [ "$method" ] && errorIn "Can only specify one challenge type" ; method="HTTP-01:manual" ; shift
       useHTTP="manual" ;;
     -c)
-      shift ; certLocation="$1" ; shift ;;
+      shift ; certLocation="`cd "$(dirname "$1")"; pwd`/`basename "$1"`" ; shift ;;
     -C)
-      shift ; certChainLocation="$1" ; shift ;;
+      shift ; certChainLocation="`cd "$(dirname "$1")"; pwd`/`basename "$1"`" ; shift ;;
     -k)
-      shift ; keyLocation="$1" ; shift ;;
+      shift ; keyLocation="`cd "$(dirname "$1")"; pwd`/`basename "$1"`" ; shift ;;
     -a)
-      shift ; chainLocation="$1" ; shift ;;
+      shift ; chainLocation="`cd "$(dirname "$1")"; pwd`/`basename "$1"`" ; shift ;;
     -r)
-      shift ; rootLocation="$1" ; shift ;;
+      shift ; rootLocation="`cd "$(dirname "$1")"; pwd`/`basename "$1"`" ; shift ;;
     -U)
       shift ; regenUserKey="YES" ;;
     -u)
-      shift ; userPubLocation="$1" ; shift ;;
+      shift ; userPubLocation="`cd "$(dirname "$1")"; pwd`/`basename "$1"`" ; warningIn "userPubLocation '-u' is depricated as all pubkey data is stored in user.key/userKeyLocation. This options does nothing." shift ;;
     -p)
-      shift ; userKeyLocation="$1" ; shift ;;
+      shift ; userKeyLocation="`cd "$(dirname "$1")"; pwd`/`basename "$1"`" ; shift ;;
     -j)
-      shift ; userKIDLocation="$1" ; shift ;;
+      shift ; userKIDLocation="`cd "$(dirname "$1")"; pwd`/`basename "$1"`" ; shift ;;
     -V)
       shift ; VERBOSE=1 ;;
     -h|--help)
       cat <<EOF
 
-Usage: $0 [-e <emailAddress>] [-H|-D]{see below} [-d] [-h] [-v] [-a|c|C|k|p|u <path>]* <FQDN> <SAN> ...
+Usage: $0 [-e <emailAddress>] [-H|-D]{see below} [-d] [-h] [-v] [-a|c|C|k|p <path>]* <FQDN> <SAN> ...
 
  -d Dry run, contacts LE staging server.
  -e If emailAddress is not specified will use webmaster@FQDN.
@@ -72,14 +72,12 @@ Usage: $0 [-e <emailAddress>] [-H|-D]{see below} [-d] [-h] [-v] [-a|c|C|k|p|u <p
  -v some kind of verbose (set -v)
 
 PEM/Token OUTPUT FILES
- ## Removed options : -a <path>, intermediate CA chain output location.
- ## Temporarily Removed option: -c <path>, certificate output location.
- ## Temporarily Removed option: -C <path>, certificate and intermediate CA chain combined output location.
- ## Temporarily Removed option: -k <path>, certificate's private key output location.
- ## Temporarily Removed option: -r <path>, root CA output location.
- >> Temporarily find 2 of abouve outputs in new acme.???? temp directory: DOMAIN.crt (-C) DOMAIN.key 
+ -a <path>, intermediate CA chain output location.
+ -c <path>, certificate output location.
+ -C <path>, certificate and intermediate CA chain combined output location.
+ -k <path>, certificate's private key output location.
+ -r <path>, root CA output location.
  -p <path>, Authorisation user key output/reuse location.
- -u <path>, Authorisation user pubkey output/reuse location.
  -j <path>, Authorisation user KID Token output/reuse location.
  -U <path>, Regenerate authorisation user keys even if it exists (as specified by (-p))
 
@@ -495,4 +493,27 @@ cat Response.ret > $domains.crt
 
 checkNBale
 
-openssl x509 -in "$domains.crt" -noout -subject
+#openssl x509 -in "$domains.crt" -noout -subject
+
+############################################
+#---------------------------- Obtain Root CA
+# From known authoirative source
+#curl -m 5 -s -H 'Accept: application/pkix-cert' -o caroot.der $rootCAURL
+#openssl x509 -in caroot.der -inform DER > caroot.crt
+curl -m 5 -s -H 'Accept: application/x-pem-file' -o caroot.crt "$rootCAURL" || warningIn "Unable to obtain Root CA"
+
+###############################################################################
+#------------------------------------------------------Format Certs for Output
+CERTDOMAIN=`cat $domains.crt | splitCerts` || errorIn "Cannot split certificates from LetsEncrypt"
+checkNBale
+stashHashNoClash caroot.crt $CERTDOMAIN/Root
+
+mkdir backup && chmod 0700 backup
+[ "$certLocation" ]      && ( [ ! -e "$certLocation" ] || cp -p $certLocation backup/ )            && cat $domains.crt | splitCerts 0 0 > $certLocation
+[ "$certChainLocation" ] && ( [ ! -e "$certChainLocation" ] || cp -fp $certChainLocation backup/ ) && constructChain $CERTDOMAIN/$CERTDOMAIN.pem $CERTDOMAIN > $certChainLocation
+[ "$chainLocation" ]     && ( [ ! -e "$chainLocation" ] || cp -fp $chainLocation backup/ )          && constructChain $CERTDOMAIN/$CERTDOMAIN.pem $CERTDOMAIN | splitCerts 1 > $chainLocation
+[ "$rootLocation" ]      && ( [ ! -e "$rootLocation" ] || cp -fp $rootLocation backup/ )            && cat caroot.crt > $rootLocation
+umask 0077
+[ "$keyLocation" ]       && ( [ ! -e "$keyLocation" ] || cp -fp $keyLocation backup/ )             && cat $domains.key > $keyLocation
+rmdir backup # remove if empty
+
