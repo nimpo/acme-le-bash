@@ -195,3 +195,118 @@ function getHTTPHeader () { # Gets a header $1 from file $2 or stdin if $2 not s
   fi
 }
 
+#------------Cert Functions
+function getCertHash () {
+  openssl x509 -in "$1" -noout -hash 2>/dev/null
+}
+
+function getIssuerHash () {
+  openssl x509 -in "$1" -noout -issuer_hash 2>/dev/null
+}
+
+function isCA () {
+  openssl x509 -in "$1" -purpose -noout 2>/dev/null |grep -q "^SSL server CA : Yes"
+}
+
+function isRootCA () {
+  isCA "$1" || return 1
+  [ `getCertHash "$1"` = `getIssuerHash "$1"` ]
+}
+
+function getCertPrimaryName () {
+  CertName="`openssl x509 -in "$1" -noout -nameopt multiline -subject 2>/dev/null | grep '^[[:space:]]*commonName[[:space:]]*=[[:space:]]*[a-zA-Z0-9_-]*\.[a-zA-Z0-9_.-]*$' |head -n 1|sed -e 's/^[[:space:]]*commonName[[:space:]]*=[[:space:]]*//'`"
+  [ "$CertName" ] || CertName="`openssl x509 -in "$1" -noout -ext subjectAltName 2>/dev/null | grep '^[[:space:]]*DNS:[a-zA-Z0-9_-]*\.[a-zA-Z0-9_.-]*$' |head -n 1 |sed -e 's/^[[:space:]]*DNS://'`"
+  [ "$CertName" ] || Certname=`getCertHash "$1" |grep '^[0-9a-f]\{8\}$'`
+  [ "$CertName" ] && echo "$CertName" || return 1
+}
+
+stashHashNoClash () {
+  dir="${2:-.}" ; mkdir -p $dir
+  hash=`getCertHash "$1"`
+  i=0 ; while [ -e "$dir/$hash.$i" ] ; do let $i++ ; done
+  cp -p "$1" "$dir/$hash.$i"
+}
+
+
+# Separate a concatinated pem bundle on stdin into separate PEM certs...
+# If ! $1 then separate concatenated PEMS in $1 into <DNS>/<DNS>.pem <DNS>/Intermediate/<hash>.0 and <DNS>/Root/<hash>.0
+#   where <DNS> is the first DNS name processed EEC in the concatenated PEM file.
+#   Echos <DNS> to STDOUT
+# If $1 [$2] then extracts certificate $1 -- $2 where we start counting at 0 to STDOUT
+#
+# splitCerts [first] [last] ### starting to read at verse 0
+
+splitCerts () { # Take a pem chain on stdin and split it into its components
+#  [ -r "$1" ] && [ -s "$1" ] || return 1
+  FirstCertName="UnNamedCert"
+  Split=`mktemp -d -p.`
+  cat > $Split/temp
+  cd "$Split"
+  awk 'BEGIN {a=0} /^-----BEGIN CERTIFICATE-----$/ {a++} {b=sprintf("%03i",a/2); if (a%2) print $0 > "tempout" b}  /^-----END CERTIFICATE-----$/ {a++}' temp
+  i=0
+  for temp in tempout*
+  do
+    if [ "$1" ]
+    then # extract certain certs from chain
+      [ "$2" ] || set - $1 999
+      [ $i -ge $1 ] && [ $i -le $2 ] && cat "$temp"
+      let i++
+      rm "$temp"
+    else
+      hash=`getCertHash "$temp"` || continue # skip broken certs silently
+      ihash=`getIssuerHash "$temp"`
+      isRootCA $temp && mkdir -p Root && stashHashNoClash "$temp" Root && continue
+      isCA $temp && mkdir -p Intermediate && stashHashNoClash "$temp" Intermediate && continue
+      CertName=`getCertPrimaryName "$temp"` || CertName="UnNamedCert"
+      mv "$temp" "$CertName.pem"
+      [ "$FirstCertName" = "UnNamedCert" ] && FirstCertName="$CertName"
+    fi
+  done
+  rm temp
+  cd ..
+  rmdir "$Split" 2>/dev/null && return # only returns if sucessful, i.e. we catted certs to stdout
+  [ -e "$FirstCertName" ] && mv "$FirstCertName" "$FirstCertName.`date +%s`"
+  mv "$Split" "$FirstCertName"
+  echo "$FirstCertName"
+}
+
+function constructChain () { # $1 is cert $2... are paths to CA certs or CA cert dirs CAs must be in Openssl hash{8}.[0-9] format
+  cert="$1"
+  shift
+  localchain=("$cert")
+  i=0
+  while ! isRootCA "$cert"
+  do
+    let i++
+    issuerhash=`getIssuerHash $cert`
+    unset issuer
+    for issuer in `find $@ -name $issuerhash.[0-9]` # loop to get issuer
+    do
+      openssl verify -partial_chain -trusted "$issuer" "$cert" >/dev/null 2>&1 && ! isRootCA "$issuer" && localchain+=("$issuer") && break 
+    done
+    [ "$issuer" ] || break
+    cert=$issuer
+  done
+  for cert in ${localchain[@]} ; do openssl x509 -in $cert ; done
+}
+
+
+function constructChainWithRoots () { # $1 is cert $2... are paths to CA certs or CA cert dirs CAs must be in Openssl hash{8}.[0-9] format
+  cert="$1"
+  shift
+  localchain=("$cert")
+  i=0
+  while ! isRootCA "$cert"
+  do
+    let i++
+    issuerhash=`getIssuerHash $cert`
+    unset issuer
+    for issuer in `find $@ -name $issuerhash.[0-9]` # loop to get issuer
+    do
+      openssl verify -partial_chain -trusted "$issuer" "$cert" >/dev/null 2>&1 && localchain+=("$issuer") #&& break not sure if we should break here se e.g. letsencrypt staging, therea a root and a non root CA with the came hash!
+    done
+    [ "$issuer" ] || break
+    cert=$issuer
+  done
+  for cert in ${localchain[@]} ; do openssl x509 -in $cert ; done
+}
