@@ -42,6 +42,11 @@ function verbose () { # echos arguments if VERBOSE is set
   return 0
 }
 
+function debug () { # echos arguments >&2 if DEBUG is set 
+  [ "$DEBUG" ] && [ "$1" ] && printf " >>> %s\n" "$@" >&2
+  return 0
+}
+
 function checkFQDN () { # Check if stdin is exactly 1 FQDN < 64 chars 
   tr '\n' '\r' |sed -e 's/\r$//' | grep -q '^[a-z0-9]\(-\{0,1\}[a-z0-9]\)*\(\.[a-z0-9]\(-\{0,1\}[a-z0-9]\)*\)*$' || return 1
 }
