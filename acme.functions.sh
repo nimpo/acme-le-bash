@@ -34,7 +34,7 @@ function errorIn () { #add argument ERRORS array
 
 function warningIn () {
 #  [ "$1" ] && WARNINGS+=$@ && printf " *** %s *** \n" "$@" ; return
-  [ "$1" ] && printf "Warning: %s\n" "$@" ; return
+  [ "$1" ] && printf "Warning: %s\n" "$@" >&2 ; return
 }
 
 function verbose () { # echos arguments or reveals stdout if VERBOSE is set
