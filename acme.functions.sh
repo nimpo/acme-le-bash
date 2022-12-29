@@ -29,7 +29,7 @@ function checkCommands () { #Quick check for all commands
 checkCommands jq openssl curl grep /bin/echo mktemp uname sudo tr ln chmod sed bash cat xargs base64
 
 function errorIn () { #add argument ERRORS array
-  [ "$1" ] && ERRORS+=$@ ; return
+  [ "$1" ] && ERRORS+=("$@") ; return
 }
 
 function warningIn () {
