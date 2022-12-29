@@ -24,7 +24,9 @@ do
     -DAWS) # Use DNS with nest arg 
       checkCommands aws
       [ "$method" ] && errorIn "Can only specify one challenge type" ; method="DNS-01:AWS" ; shift
-      useDNS="AWS" ; case $1 in -*) ;; *) AWSProfile="default" ;; esac ;;
+      useDNS="AWS" ;; # case $1 in -*) ;; *) AWSProfile="" ;; esac ;;
+    -P)
+      shift ; AWSProfile="$1" ; shift ;;
     -D)
       [ "$method" ] && errorIn "Can only specify one challenge type" ; method="DNS-01:manual" ; shift
       useDNS="manual"
@@ -94,9 +96,11 @@ CHALLENGES OPTIONS
                      (requires sudo).
    -Hmanual,         Spits HTTP-01 token out to terminal and lets you find a way to host it.
  -D... options use DNS-01:
- -DAWS [profile],    Uses aws cli to update DNS record hosted in Route53.
-                     (Optionally specify an AWS profile (default is "default"!))
+ -DAWS,              Uses aws cli to update DNS record hosted in Route53.
+                     Use -P to set profile to use for AWS commands (default is "default"!)
  -Dmanual            Spits DNS-01 token out to terminal and lets you find a way to update TXT record.
+
+ -P <AWScli profile> See -DAWS.
 
  -w <path>,          Derpicated === -HDocRoot <path>
  -n,                 Depricated === -Hnc
