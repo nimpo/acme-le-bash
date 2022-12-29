@@ -415,14 +415,22 @@ then                        # TXT in _acme-challenge.<YOUR_DOMAIN> "..."
     for domain in ${domains[@]}
     do
       Token=`echo -n ${DNSToken[$domain]}.$JWKDgstB64 |Dgst |B64`
-      [ "$GGLDNS" ] && TXT=`dig @8.8.8.8 "_acme-challenge.$domain" TXT +short` || TXT=`dig "_acme-challenge.$domain" TXT +short`
+      if [ "$GGLDNS" ] 
+      then 
+        verbose "Checking 8.8.8.8 for _acme-challenge.$domain TXT record"
+        TXT=`dig @8.8.8.8 "_acme-challenge.$domain" TXT +short`
+      else
+        verbose "Checking local nameserver for _acme-challenge.$domain TXT record"
+        TXT=`dig "_acme-challenge.$domain" TXT +short`
+      fi
       [ "$TXT" != "\"$Token\"" ] && TXTtest="fail"
+      verbose "...got TXT=$TXT"
       sleep 1
     done
     [ "$TXTtest" ] || break
     sleep $i
   done
-  ! [ "$GGLDNS" ] && i=${DNSWait:-60} ; verbose "Extra sleep $i seconds as cannot reach 8.8.8.8 here" && while [ $i -gt 0 ] ; do [ "$VERBOSE" ] && echo -n . ; sleep 1 ; let i-- ; done ; [ "$VERBOSE" ] && echo
+  ! [ "$GGLDNS" ] && i=${DNSWait:-60} && verbose "Extra sleep $i seconds as cannot reach 8.8.8.8 here" && while [ $i -gt 0 ] ; do [ "$VERBOSE" ] && echo -n . ; sleep 1 ; let i-- ; done ; [ "$VERBOSE" ] && echo
 elif [ "$method" = "DNS-01:manual" ]
 then
   verbose "do manual DNS-01 route not implemented yet"
