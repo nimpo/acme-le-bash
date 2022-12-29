@@ -168,17 +168,21 @@ then
   done
   if [ "$method" = "DNS-01:AWS" ]
   then
-    ARN=`aws --profile "$AWSProfile" --output json sts get-caller-identity|jq -r .Arn` || errorIn "Cannot talk to AWS"
+    aws --profile "$AWSProfile" --output json sts get-caller-identity > awsapi-$$.ret
+    ARN=`jq -r .Arn awsapi-$$.ret` || errorIn "Cannot talk to AWS"
+    ACC=`jq -r .Account awsapi-$$.ret`
     verbose "Assuming AWS ARN: $ARN"
     checkNBale
     for zoneRoot in "${!ZoneIDs[@]}"
     do
-      ZoneIDs[$zoneRoot]=`aws --profile "$AWSProfile" --output json route53 list-hosted-zones-by-name --dns-name "$zoneRoot" | jq -r '.HostedZones[0].Id' |sed -e 's#^/hostedzone/\([A-Z0-9]*\).*$#\1#' | grep '^[A-Z0-9]\{1,\}$'` # That RE is a guess Can't find AWS spec
-      [ "${ZoneIDs[$zoneRoot]}" ] && verbose "got AWS zone ID ${ZoneIDs[$zoneRoot]} for Zone $zoneRoot" || errorIn "Cannot find $zoneRoot in this AWS account"
+      aws --profile "$AWSProfile" --output json route53 list-hosted-zones-by-name --dns-name "$zoneRoot" 2> awsapi-$$.err >awsapi-$$.ret || errorIn "AWS says '`grep . awsapi-$$.err`'."
+      ZoneIDs[$zoneRoot]=`jq -r '.HostedZones[0].Id' awsapi-$$.ret |sed -e 's#^/hostedzone/\([A-Z0-9]*\).*$#\1#' | grep '^[A-Z0-9]\{1,\}$'`
+      [ "${ZoneIDs[$zoneRoot]}" ] && verbose "got AWS zone ID ${ZoneIDs[$zoneRoot]} for Zone $zoneRoot" || errorIn "Error finding $zoneRoot in this AWS account $ACC"
     done
   fi
   # Now we have mapping for domain -> it's zone, [and (if using AWS) zone -> it's AWS ZoneID. So when makeing aws UPSERTS they can be batched per zone].
 fi
+rm -f awsapi-$$.ret awsapi-$$.err
 checkNBale
 
 #---------------------------- Reuseable KID Token needed if reusing user.key
