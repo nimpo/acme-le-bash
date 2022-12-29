@@ -328,13 +328,14 @@ do
   verbose "In domain loop for $FQDN"
   SignedJSONPayload=`genJWS "" "$JWK" "${authorizations[$FQDN]}"  "$ReplayNonce"`
   curl -m 5 -s -H "Content-Type: application/jose+json" -o Response.ret -D ResponseHead.ret -d "$SignedJSONPayload" "${authorizations[$FQDN]}" || errorIn "Cannot get token for $FQDN" 
-  DNSToken[$FQDN]=`jq -r '.challenges[]| select(.type == "dns-01")|.token' Response.ret |grep '^[A-Za-z0-9_-]\{1,\}$'` || errorIn "unable to get dns-01 token for $FQDN"
-  HTTPToken[$FQDN]=`jq -r '.challenges[]| select(.type == "http-01")|.token' Response.ret |grep '^[A-Za-z0-9_-]\{1,\}$'` || errorIn "unable to get http-01 token for $FQDN"
-  TLSALPNToken[$FQDN]=`jq -r '.challenges[]| select(.type == "tls-alpn-01")|.token' Response.ret |grep '^[A-Za-z0-9_-]\{1,\}$'` || errorIn "unable to get tls-alpn-01 token for $FQDN"
-  DNSURL[$FQDN]=`jq -r '.challenges[]| select(.type == "dns-01")|.url' Response.ret |filterHTTP` || errorIn "unable to get dns-01 URL for $FQDN"
-  HTTPURL[$FQDN]=`jq -r '.challenges[]| select(.type == "http-01")|.url' Response.ret |filterHTTP` || errorIn "unable to get http-01 URL for $FQDN"
-  TLSALPNURL[$FQDN]=`jq -r '.challenges[]| select(.type == "tls-alpn-01")|.url' Response.ret |filterHTTP` || errorIn "unable to get tls-alpn-01 URL for $FQDN"
+  DNSToken[$FQDN]=`jq -r '.challenges[]| select(.type == "dns-01")|.token' Response.ret |grep '^[A-Za-z0-9_-]\{1,\}$'` || warningIn "unable to get dns-01 token for $FQDN"
+  HTTPToken[$FQDN]=`jq -r '.challenges[]| select(.type == "http-01")|.token' Response.ret |grep '^[A-Za-z0-9_-]\{1,\}$'` || warningIn "unable to get http-01 token for $FQDN"
+  TLSALPNToken[$FQDN]=`jq -r '.challenges[]| select(.type == "tls-alpn-01")|.token' Response.ret |grep '^[A-Za-z0-9_-]\{1,\}$'` || warningIn "unable to get tls-alpn-01 token for $FQDN"
+  DNSURL[$FQDN]=`jq -r '.challenges[]| select(.type == "dns-01")|.url' Response.ret |filterHTTP` || warningIn "unable to get dns-01 URL for $FQDN"
+  HTTPURL[$FQDN]=`jq -r '.challenges[]| select(.type == "http-01")|.url' Response.ret |filterHTTP` || warningIn "unable to get http-01 URL for $FQDN"
+  TLSALPNURL[$FQDN]=`jq -r '.challenges[]| select(.type == "tls-alpn-01")|.url' Response.ret |filterHTTP` || warningIn "unable to get tls-alpn-01 URL for $FQDN"
 done
+checkNBale
 
 ######################################################################
 #----------------------------------- Pop those tokens in!
