@@ -461,18 +461,21 @@ do
   else
     SignedJSONPayload=`genJWS "{}" "$JWK" "${HTTPURL[$domain]}" "$ReplayNonce"`
     curl -m 5 -s -H "Content-Type: application/jose+json" -o Response.ret -D ResponseHead.ret -d "$SignedJSONPayload" "${HTTPURL[$domain]}" || errorIn "Cannot trigger Checks $domain"
-   challengeStatus=`jq '.status' Response.ret | sed -e 's/"\([^"]*\)"/\1/'`
-  fi
-  for i in 1 2 4 8 16 32 
-  do
-    [ "$challengeStatus" != "pending" ] && break
-    sleep $i
-    SignedJSONPayload=`genJWS "" "$JWK" "$ORDERURL" "$ReplayNonce"`
-    curl -m 5 -s -H "Content-Type: application/jose+json" -o Response.ret -D ResponseHead.ret -d "$SignedJSONPayload" "$ORDERURL" || errorIn "Cannot check order URL for $domain" 
     challengeStatus=`jq '.status' Response.ret | sed -e 's/"\([^"]*\)"/\1/'`
-  done
-  [ "$challengeStatus" != "ready" ] && echo "Failed to verify $domain" >&2 && exit 1
+  fi
 done
+
+#---------------------------- Checking back with LetsEncrypt for Order Status
+for i in 1 2 4 8 16 32 60 60 60 60 
+do
+  verbose "Waiting another $i seconds for LetsEncrypt to respond to Domain Challenge for $domains"
+  [ "$challengeStatus" != "pending" ] && break
+  sleep $i
+  SignedJSONPayload=`genJWS "" "$JWK" "$ORDERURL" "$ReplayNonce"`
+  curl -m 5 -s -H "Content-Type: application/jose+json" -o Response.ret -D ResponseHead.ret -d "$SignedJSONPayload" "$ORDERURL" || errorIn "Cannot check order URL for $domain" 
+  challengeStatus=`jq '.status' Response.ret | sed -e 's/"\([^"]*\)"/\1/'`
+done
+[ "$challengeStatus" != "ready" ] && [ "$challengeStatus" != "valid" ] && echo "Failed to verify $domain" >&2 && exit 1
 
 
 ###############################################################################
