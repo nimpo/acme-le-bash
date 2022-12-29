@@ -133,14 +133,15 @@ function generateCSR () { # Generates a CSR > $1.csr using config in $1.cnf
 }
 
 function checkFile () { # Takes a string--a path--to an existing or soon to be existing file and attempts to check it can be written to
+  [ -z "$1" ] && echo "expecitng a string in checkFile" && return 1
   echo "$1" |grep -q '^[^/]' && echo "expecitng full path not local path $1" && return 1 # This is a local filename
   echo "$1" |grep -q '^\.\{1,2\}/' && echo "Path cannot be relative in $1" && return 1 # path is relative to this path
   echo "$1" |grep -q '/\.\./' && echo "Path cannot have relative components in $1" # path has relative components
   [ -L "$1" ] && echo "Leaf symbolic links not supported. $1 is a symbolic link" && return 1
   [ -d "$1" ] && echo "Directory found $1 when expecting filename" && return 1
   [ -f "$1" ] && [ ! -w "$1" ] && echo "Can't write to existing $1" && return 1
-  [ -e "$1" ] && echo "$1 is not a file." && return 1
-  [ ! -e "$outfile" ] && touch "$1" && rm "$1" && return 0
+  [ ! -e "$1" ] && touch "$1" && rm "$1" && return 0
+  [ ! -f "$1" ] && echo "$1 is not a file." && return 1
   return 0
 }
 
