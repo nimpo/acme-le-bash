@@ -8,6 +8,42 @@ export LC_ALL=C
 declare -a ERRORS
 declare -a WARNINGS
 
+function verbose () { # echos arguments if VERBOSE is set
+  [ "$VERBOSE" ] && [ "$1" ] && printf " *** %s\n" "$@"
+  return 0
+}
+
+function debug () { # echos arguments >&2 if DEBUG is set 
+  [ "$DEBUG" ] && [ "$1" ] && printf " >>> %s\n" "$@" >&2
+  return 0
+}
+
+# Make a temp file / dir
+#   mktempfile mktempdir
+#   creates file / directory in CWD to a specific format and sends the name to STDOUT
+function mktempfile () {
+  mktemp -p. acme.le.tmp.file.XXXXXXXX
+}
+
+function mktempdir () { 
+  mktemp -d -p. acme.le.tmp.dir.XXXXXXXX
+}
+
+# Delete temp file / dir as made by mktempfile / mktempdir
+# Checks format before issuing delete commands; returns 0 if successful
+function deltempfile () {
+  debug "Attempting to remove '$1'"
+  echo "$1" | grep -q '\(^\|/\)acme\.le\.tmp\.file\.[a-zA-Z0-9]\{8\}$' && [ -f "$1" ] && [ -r "$1" ] || return 1
+  rm "$1"
+}
+
+function deltempdir () {
+  debug "Attempting to remove '$1'; PWD is `pwd`"
+  echo "$1" | grep -q '\(^\|/\)acme\.le\.tmp\.dir\.[a-zA-Z0-9]\{8\}$' && [ -d "$1" ] || return 1
+  rm -rf "$1"
+}
+
+
 function finish { # Print Errors and Warnings on exit Could delete acme.tmpdir but 
   [ ${#WARNINGS[@]} -gt 0 ] && printf "Warning: %s\n" "${WARNINGS[@]}"
   [ ${#ERRORS[@]} -gt 0 ] && printf "Error: %s\n" "${ERRORS[@]}"
@@ -35,16 +71,6 @@ function errorIn () { #add argument ERRORS array
 function warningIn () {
 #  [ "$1" ] && WARNINGS+=$@ && printf " *** %s *** \n" "$@" ; return
   [ "$1" ] && printf "Warning: %s\n" "$@" >&2 ; return
-}
-
-function verbose () { # echos arguments if VERBOSE is set
-  [ "$VERBOSE" ] && [ "$1" ] && printf " *** %s\n" "$@"
-  return 0
-}
-
-function debug () { # echos arguments >&2 if DEBUG is set 
-  [ "$DEBUG" ] && [ "$1" ] && printf " >>> %s\n" "$@" >&2
-  return 0
 }
 
 function checkFQDN () { # Check if stdin is exactly 1 FQDN < 64 chars (because 64 is convention for X.509 certificates) must have valid TLD i.e. must not be only numneric (so not to overlap IPv4)
@@ -215,6 +241,30 @@ function isCA () {
 function isRootCA () {
   isCA "$1" || return 1
   [ `getCertHash "$1"` = `getIssuerHash "$1"` ]
+}
+
+function getIssuerURL () { # Function to get Issuer based upon authorityInfoAccess: getIssuerURL <pathToCert>
+  openssl x509 -in "$1" -noout -ext authorityInfoAccess |grep '^[[:space:]]*CA Issuers - URI:http[a-zA-Z0-9/_.:-]*$' |sed -e 's/^[[:space:]]*CA Issuers - URI://'
+  return ${PIPESTATUS[0]
+}
+
+# Function to get certificate to <dns>.pem
+#   getCertByURL <URL>
+#
+function getCertByURL () {
+  echo "$1" | grep -q '^https?://' && TempLocation=`mktempfile` && TempLocation2=`mktempfile` || return 1
+  curl -o "$TempLocation" "$1" || return 1
+
+  if openssl x509 -in "$TempLocation" -noout 2>/dev/null ; then cp "$TempLocation" "$TempLocation2"
+  elif openssl x509 -inform -inform DER -in "$TempLocation" -noout 2>/dev/null ; then openssl x509 -inform DER -in "$TempLocation" -out "$TempLocation2"
+  elif openssl pkcs7 -in "$TempLocation" -noout 2>/dev/null ; then openssl pkcs7 -in "$TempLocation" -print_certs |openssl x509 > "$TempLocation2"
+  elif openssl pkcs7 -inform DER -in "$TempLocation" -noout 2>/dev/null ; then openssl pkcs7 -in "$TempLocation" -inform DER -print_certs |openssl x509 > "$TempLocation2"
+  fi
+
+  DNSName=`getCertPrimaryName "$TempLocation2"` | return 1
+  [ -e "$DNSName.pem" ] && mv "$DNSName.pem" "$DNSName.pem.`date +%s`"
+  mv "$TempLocation2" "$DNSName.pem" && echo "$DNSName.pem"
+  deltempfile "$TempLocation"
 }
 
 function getCertPrimaryName () {
@@ -486,30 +536,4 @@ checkCertFormat () {
   echo UNKNOWN
   return 1
 }
-
-# Make a temp file / dir
-#   mktempfile mktempdir
-#   creates file / directory in CWD to a specific format and sends the name to STDOUT
-mktempfile () {
-  mktemp -p. acme.le.tmp.file.XXXXXXXX
-}
-
-mktempdir () { 
-  mktemp -d -p. acme.le.tmp.dir.XXXXXXXX
-}
-
-# Delete temp file / dir as made by mktempfile / mktempdir
-# Checks format before issuing delete commands; returns 0 if successful
-deltempfile () {
-  debug "Attempting to remove '$1'"
-  echo "$1" | grep -q '\(^\|/\)acme\.le\.tmp\.file\.[a-zA-Z0-9]\{8\}$' && [ -f "$1" ] && [ -r "$1" ] || return 1
-  rm "$1"
-}
-
-deltempdir () {
-  debug "Attempting to remove '$1'; PWD is `pwd`"
-  echo "$1" | grep -q '\(^\|/\)acme\.le\.tmp\.dir\.[a-zA-Z0-9]\{8\}$' && [ -d "$1" ] || return 1
-  rm -rf "$1"
-}
-
 
