@@ -75,8 +75,9 @@ function errorIn () { #add argument ERRORS array
 }
 
 function warningIn () {
-#  [ "$1" ] && WARNINGS+=$@ && printf " *** %s *** \n" "$@" ; return
-  [ "$1" ] && printf "Warning: %s\n" "$@" >&2 ; return
+  [ "$1" = "-q" ] && shift || local QUIET=no
+  [ "$1" ] && WARNINGS+=("$@") && [ "$QUIET" = "no" ] && printf "Warning: %s\n" "$@" >&2
+  return 0
 }
 
 function checkFQDN () { # Check if stdin is exactly 1 FQDN < 64 chars (because 64 is convention for X.509 certificates) must have valid TLD i.e. must not be only numneric (so not to overlap IPv4)
