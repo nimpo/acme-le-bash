@@ -1,11 +1,18 @@
 #!/bin/bash
 
-. acme.functions.sh
+THISSCRIPT=`readlink -f $0`
+THISDIR=`dirname $THISSCRIPT`
+### Load in function safely
+#[ "`sha1sum $THISDIR/acme.functions.sh |sed -e 's/ .*//'`" != "b123b140a011c2ececb9b89d7e9434722f7fd935" ] && echo "Can't find acme.functions.sh" && exit 1
+. $THISDIR/acme.functions.sh
+
+
+#. acme.functions.sh
 #---------------------------- Options
 
 declare -a domains
 AWSProfile="default" 
-
+DEBUG=Y
 
 
 while [ "$1" ]
@@ -37,7 +44,7 @@ do
     -HDocRoot)
       [ "$method" ] && errorIn "Can only specify one challenge type" ; method="HTTP-01:DocRoot" ; shift
       case $1 in -*) errorIn "Method $method requires an argument." ;; *) docRoot="$1" ; shift ;; esac
-      useHTTP="DocRoot" ; shift ;;
+      useHTTP="DocRoot" ;;
     -H)
       [ "$method" ] && errorIn "Can only specify one challenge type" ; method="HTTP-01:manual" ; shift
       useHTTP="manual" ;;
