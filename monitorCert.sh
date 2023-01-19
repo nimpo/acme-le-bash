@@ -4,24 +4,19 @@ THISDIR=`dirname $THISSCRIPT`
 
 # Req
 function reqfunction () {
-#  $THISDIR/acme.sh -C $1 -k $2 -V -DAWS -P personalDNS -d -e mike.jones@manchester.ac.uk ${FQDNS[@]}
   $THISDIR/acme.sh -C $1 -k $2 -V -DAWS -P personalDNS -d -e dr.mike.jones@gmail.com ${FQDNS[@]}
 } 
 
 ### Load in function safely
-#[ "`sha1sum $THISDIR/acme.functions.sh |sed -e 's/ .*//'`" != "b123b140a011c2ececb9b89d7e9434722f7fd935" ] && echo "Can't find acme.functions.sh" && exit 1
+[ "`sha1sum $THISDIR/acme.functions.sh |sed -e 's/ .*//'`" != "6c23e71b920a90c8d9ce4f82282eeafe2d6a2727" ] && echo "Can't find valid acme.functions.sh" && exit 1
 . $THISDIR/acme.functions.sh
 
 #System environment
 PATH="/bin:/usr/bin"
 
-# ERROR used to bail if set
-unset ERROR # If this gets set we need to bail
-unset WARN  # If this gets set with no errors we will need to request a nes cert from LetsEncrypt
-
 declare -a FQDNS=()
 TRUSTPATH="/etc/ssl/certs" # Default system path
-RENEWAL=14
+RENEWAL=28
 
 while [ "$1" ]
 do
