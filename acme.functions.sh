@@ -439,7 +439,7 @@ function DNScheck () { # Attempt to resolve FQDN(s). For Acme HTTP-01 this needs
 # Check cert name of pem cert in $1 against dns names in $2 -- $N
 #   checkNames <pathToCert> <dnsName> [<dnsname>]...
 #
-checkNames () {
+function checkNames () {
   MyCERTPATH="$1"
   local OK=0
   shift
@@ -458,7 +458,7 @@ checkNames () {
 # Check Date of $1 certificate
 #   checkDates <pathToCert> [<DaysHeadsUp>]
 #
-checkDates () {
+function checkDates () {
   debug "checkDates $@"
   local NOTBEFOREDATE=`openssl x509 -in "$1" -noout -startdate` || return 127
   local NOTAFTERDATE=`openssl x509 -in "$1" -noout -enddate` || return 127
@@ -478,7 +478,7 @@ checkDates () {
 #   checkCertModsMatch <pathToCert1> <pathToCert2>
 #   checkCertsMatch <pathToCert1> <pathToCert2>
 #
-checkKeyCertMatch () {
+function checkKeyCertMatch () {
   debug "checkKeyCertMatch $@"
   ModulusKey=`openssl rsa -in "$1" -noout -modulus` || return 127
   ModulusCert=`openssl x509 -in "$2" -noout -modulus` || return 127
@@ -486,7 +486,7 @@ checkKeyCertMatch () {
   [ "$ModulusCert" = "$ModulusKey" ] && return 0
 }
 
-checkCertModsMatch () { # Not necessarily identical certs just identical key material
+function checkCertModsMatch () { # Not necessarily identical certs just identical key material
   debug "checkKeyCertMatch $@"
   ModulusCert1=`openssl x509 -in "$1" -noout -modulus` || return 127
   ModulusCert2=`openssl x509 -in "$2" -noout -modulus` || return 127
@@ -494,7 +494,7 @@ checkCertModsMatch () { # Not necessarily identical certs just identical key mat
   [ "$ModulusCert1" = "$ModulusCert2" ] && return 0
 }
 
-checkCertsMatch () {
+function checkCertsMatch () {
   debug "checkKeyCertMatch $@"
   FingerprintCert1=`openssl x509 -in "$1" -noout -SHA256 -fingerprint` || return 127
   FingerprintCert2=`openssl x509 -in "$2" -noout -SHA256 -fingerprint` || return 127
@@ -505,7 +505,7 @@ checkCertsMatch () {
 # Checks first cert (first PEM in first cert with system trust roots and optional N untrusted Intermediate CAfiles
 #   checkCertChain <pathToCertUnderTest> <PathToTrustedCAs> [ <pathToUntrustedCAChain> ] ...
 #
-checkCertChain () {
+function checkCertChain () {
   [ -f "$2" ] && CAs=("-CAfile" "$2")
   [ -d "$2" ] && CAs=("-CApath" "$2")
   CUT="$1"
@@ -517,17 +517,16 @@ checkCertChain () {
 # Gets all certs as published in Openssl Handshake as multiPEM
 #  getServerCert <servername> [<IPaddr>]
 #
-getServerCert () {
+function getServerCert () {
   SERVER="${2:-$1}"
   debug "Obtaining TSL Cert for host: $SERVER at $1:443"
-  [ "$DEBUG" ] && echo "Obtaining TSL Cert for host: $SERVER at $1:443" >&2
-  echo | openssl s_client -servername "$SERVER" -showcerts -connect "$1:443" 2>/dev/null |awk 'BEGIN {a=0} /^-----BEGIN CERTIFICATE-----$/ {a=1} {if (a==1) print $0}  /^-----END CERTIFICATE-----$/ {a=0}'
+  echo | timeout 5 openssl s_client -servername "$SERVER" -showcerts -connect "$1:443" 2>/dev/null |awk 'BEGIN {a=0;n=0} /^-----BEGIN CERTIFICATE-----$/ {a=1;n++} {if (a==1) print $0}  /^-----END CERTIFICATE-----$/ {a=0} END {if(!n)exit(1)}'
 }
 
 # Check file is formatted PEM, DER or concatenated PEM
 #   checkCertFormat <pathToFile>
 # 
-checkCertFormat () {
+function checkCertFormat () {
   NPEMS=`awk 'BEGIN {a=0;v=0} /^-----BEGIN CERTIFICATE-----$/ {a++;data=""} {b=sprintf("%03i",a/2); if (a%2) data=data $0 "\n"}  /^-----END CERTIFICATE-----$/ {a++; print data |& "openssl x509 -noout" ; ret=close ("openssl x509 -noout") ; if (ret==0) v++} END {print v}' "$1"` || return 127
   debug "NPEMS in $1 = $NPEMS"
   [ $NPEMS -eq 1 ] && echo PEM && return 0
