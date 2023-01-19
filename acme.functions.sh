@@ -253,8 +253,9 @@ function isRootCA () {
 
 function getIssuerURL () { # Function to get Issuer based upon authorityInfoAccess: getIssuerURL <pathToCert>
   openssl x509 -in "$1" -noout -ext authorityInfoAccess |grep '^[[:space:]]*CA Issuers - URI:http[a-zA-Z0-9/_.:-]*$' |sed -e 's/^[[:space:]]*CA Issuers - URI://'
-  return ${PIPESTATUS[0]
+  return ${PIPESTATUS[0]}
 }
+
 
 # Function to get certificate to <dns>.pem
 #   getCertByURL <URL>
