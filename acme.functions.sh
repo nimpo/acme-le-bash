@@ -476,9 +476,9 @@ function checkDates () {
   local NOW=`date +%s`
   local HEADSUP=`dc -e "$END ${2:-0} 86400 * - p"` || return 127
   debug "Not before: $START; Not after: $END; Heads Up: $HEADSUP; Now: $NOW"
-  [ $NOW -ge $END ]     && echo "Expired" && return 1
-  [ $NOW -lt $START ]   && echo "Not Yet Valid" && return 2
-  [ $NOW -gt $HEADSUP ] && echo "Renew" && return
+  [ $NOW -ge $END ]     && echo "Expired" && return 2
+  [ $NOW -lt $START ]   && echo "Not Yet Valid" && return 3
+  [ $NOW -gt $HEADSUP ] && echo "Renew" && return 1
   echo "OK"
 }
 
