@@ -2,7 +2,14 @@
 export LANG=C
 export LC_ALL=C
 
-# This is file should be sourced not executed.
+# This file should be sourced not executed.
+
+# awk needs to be gawk!
+if ! awk -V |grep -q "GNU"
+then
+  echo "This script needs awk=gawk"
+  exit 1
+fi
 
 # Global Arrays to hold error and warning messages
 declare -a ERRORS
@@ -42,7 +49,6 @@ function deltempdir () {
   echo "$1" | grep -q '\(^\|/\)acme\.le\.tmp\.dir\.[a-zA-Z0-9]\{8\}$' && [ -d "$1" ] || return 1
   rm -rf "$1"
 }
-
 
 function finish { # Print Errors and Warnings on exit Could delete acme.tmpdir but 
   [ ${#WARNINGS[@]} -gt 0 ] && printf "Warning: %s\n" "${WARNINGS[@]}"
