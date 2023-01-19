@@ -456,8 +456,8 @@ function checkNames () {
   do
     echo "$a" | checkFQDN || return 127
     openssl x509 -in "$MyCERTPATH" -noout || return 127
-    openssl x509 -in "$MyCERTPATH" -noout -ext subjectAltName |grep '^[[:space:]]*DNS:[a-zA-Z0-9_-]*\.[a-zA-Z0-9_.-]*$' |sed -e 's/^[[:space:]]*DNS://' |grep -q "^$a$" && continue
-    openssl x509 -in "$MyCERTPATH" -noout -nameopt multiline -subject |grep '^[[:space:]]*commonName[[:space:]]*=[[:space:]]*[a-zA-Z0-9_-]*\.[a-zA-Z0-9_.-]*$' |sed -e 's/^[[:space:]]*commonName[[:space:]]*=[[:space:]]*//' |grep -q "^$a$" && continue
+    openssl x509 -in "$MyCERTPATH" -noout -ext subjectAltName | sed -e 's/[[:space:],]/\n/g' |grep -q "^DNS:$a$" && continue
+    openssl x509 -in "$MyCERTPATH" -noout -nameopt multiline -subject | grep -q "^[[:space:]]*commonName[[:space:]]*=[[:space:]]*$a$" && continue
     debug "checkNames: Certificate not valid for $a"
     OK=1
   done
