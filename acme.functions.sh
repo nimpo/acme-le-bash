@@ -464,6 +464,17 @@ function checkNames () {
   return $OK
 }
 
+# Extract FQDNs from certificate Start with CN in subject then all DNS SANs (so will list CN twice if it's in both subject and SANs!)
+#   getNames <pathToCert>
+#
+function getNames () {
+  openssl x509 -in "$1" -noout || return 127
+  CN=`openssl x509 -in "$1" -noout -nameopt multiline -subject | grep "^[[:space:]]*commonName[[:space:]]*=[[:space:]]*[a-zA-Z0-9.-]*[[:space:]]*$"`
+  CN=`openssl x509 -in "$1" -noout -nameopt multiline -subject | grep "^[[:space:]]*commonName[[:space:]]*=[[:space:]]*[a-zA-Z0-9.-]*[[:space:]]*$" |sed -e 's/^[[:space:]]*commonName[[:space:]]*=[[:space:]]*\([a-zA-Z0-9.-]*\)[[:space:]]*$/\1/'`
+  echo "$CN" |checkFQDN && echo "$CN"
+  openssl x509 -in "$1" -noout -ext subjectAltName | sed -e 's/[[:space:],]/\n/g' |grep "^DNS:[a-zA-Z0-9.-]*$" |sed -e 's/DNS://'
+}
+
 # Check Date of $1 certificate
 #   checkDates <pathToCert> [<DaysHeadsUp>]
 #
