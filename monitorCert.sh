@@ -127,8 +127,8 @@ function certkeychecks () {
       debug "check '$LOCALKEY' exists"
       printf "%-60s" "Checking key is on filesystem"
       ! [ -e "$LOCALKEY" ] && echo " [ FAIL ]" && warningIn -q "Local key: "$LOCALKEY" does not exist (yet)" && GET=1 && continue || echo " [  OK  ]"
-      debug "check '$LOCALKEY' exists"
-      printf "%-60s" "Checking key 'LOCALKEY' is on filesystem"
+      debug "checkKeyCertMatch '$LOCALKEY' '$LOCALCERT'"
+      printf "%-60s" "Checking key '$LOCALKEY' matches '$LOCALCERT'"
       ! checkKeyCertMatch "$LOCALKEY" "$LOCALCERT" && echo " [ FAIL ]" && warningIn -q "Local key: '$LOCALKEY' does not match Local Cert: '$LOCALCERT'" && GET=1 && continue || echo " [  OK  ]"
       return # if we get here local cert and key match
     done
