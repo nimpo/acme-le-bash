@@ -469,10 +469,9 @@ function checkNames () {
 #
 function getNames () {
   openssl x509 -in "$1" -noout || return 127
-  CN=`openssl x509 -in "$1" -noout -nameopt multiline -subject | grep "^[[:space:]]*commonName[[:space:]]*=[[:space:]]*[a-zA-Z0-9.-]*[[:space:]]*$"`
   CN=`openssl x509 -in "$1" -noout -nameopt multiline -subject | grep "^[[:space:]]*commonName[[:space:]]*=[[:space:]]*[a-zA-Z0-9.-]*[[:space:]]*$" |sed -e 's/^[[:space:]]*commonName[[:space:]]*=[[:space:]]*\([a-zA-Z0-9.-]*\)[[:space:]]*$/\1/'`
-  echo "$CN" |checkFQDN && echo "$CN"
-  openssl x509 -in "$1" -noout -ext subjectAltName | sed -e 's/[[:space:],]/\n/g' |grep "^DNS:[a-zA-Z0-9.-]*$" |sed -e 's/DNS://'
+  echo "$CN" |checkFQDN || CN=""
+  ( echo "$CN" ; openssl x509 -in "$1" -noout -ext subjectAltName | sed -e 's/[[:space:],]/\n/g' |grep "^DNS:[a-zA-Z0-9.-]*$" |sed -e 's/DNS://' |grep -v "^$CN$" )  | grep .
 }
 
 # Check Date of $1 certificate
