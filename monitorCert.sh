@@ -181,10 +181,12 @@ else
     echo Certs need getting
     declare -f reqfunction
     [ "$DRYRUN" ] || reqfunction newcert.pem newkey.pem
-    if localcertchecks newcert.pem newkey.pem && certkeychecks newcert.pem newkey.pem
+    if localcertchecks newcert.pem ${FQDNS[@]} && certkeychecks newcert.pem newkey.pem
     then
-      echo cp -p newcert.pem $CERTPATH
-      echo cp -p newkey.pem  $KEYPATH
+      cp -p newcert.pem $CERTPATH
+      cp -p newkey.pem  $KEYPATH
+      certkeychecks "$CERTPATH" "$KEYPATH" && echo "WEBSERVER RESTART REQUIRED!!"
+#      certkeychecks "$CERTPATH" "$KEYPATH" && sudo service apache2 restart
     else
       errorIn "Failed to get new certs"
       checkNBale
