@@ -58,6 +58,8 @@ cd "$WorkingDir"
 function finish {
   cd ..
   echo deltempdir "$WorkingDir"  
+  [ ${#WARNINGS[@]} -gt 0 ] && printf "Warning: %s\n" "${WARNINGS[@]}"
+  [ ${#ERRORS[@]} -gt 0 ] && printf "Error: %s\n" "${ERRORS[@]}"
 }
 trap finish EXIT
 
@@ -127,7 +129,7 @@ function certkeychecks () {
       ! [ -e "$LOCALKEY" ] && echo " [ FAIL ]" && warningIn -q "Local key: "$LOCALKEY" does not exist (yet)" && GET=1 && continue || echo " [  OK  ]"
       debug "check '$LOCALKEY' exists"
       printf "%-60s" "Checking key 'LOCALKEY' is on filesystem"
-      ! checkKeyCertMatch "$LOCALKEY" "$LOCALCERT" && echo "[ FAIL ]" && warningIn -q "Local key: '$LOCALKEY' does not match Local Cert: '$LOCALCERT'" && GET=1 && continue || echo "[ OK ]"
+      ! checkKeyCertMatch "$LOCALKEY" "$LOCALCERT" && echo " [ FAIL ]" && warningIn -q "Local key: '$LOCALKEY' does not match Local Cert: '$LOCALCERT'" && GET=1 && continue || echo " [  OK  ]"
       return # if we get here local cert and key match
     done
   done
@@ -179,7 +181,8 @@ else
     echo Apache needs reconfig
   else
     echo Certs need getting
-    declare -f reqfunction
+    FQDNSstr="${FQDNS[@]}"
+    declare -f reqfunction | grep THISDIR |sed -e 's?\$THISDIR?'"$THISDIR?" -e 's/\$VERBOSE/'"$VERBOSE/"  -e 's/\$1/'"newcert.pem/" -e 's/\$2/'"newkey.pem/" -e 's/\${FQDNS\[@\]}/'"$FQDNSstr/"
     [ "$DRYRUN" ] || reqfunction newcert.pem newkey.pem
     if localcertchecks newcert.pem ${FQDNS[@]} && certkeychecks newcert.pem newkey.pem
     then
