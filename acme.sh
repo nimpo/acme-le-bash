@@ -15,8 +15,9 @@ AWSProfile="default"
 DEBUG=Y
 
 
-while [ "$1" ]
+while [ "$*" ]
 do
+  [ -z "$1" ] && shift && continue
   case "$1" in
     -e)
       shift ; emailAddress="$1" ; shift ;;
