@@ -190,7 +190,7 @@ function Dgst () {
 function getNonce () {
 ###OLD###  curl -m 5 -sI "$acmeServiceURL/directory" | grep '^Replay-Nonce:' | sed -e 's/Replay-Nonce:[[:space:]]*//' | tr -cd 'A-Za-z0-9_-'
 #Should probably use ${directory[newNonce]}
-  curl -m 5 -sI "$acmeServiceURL/directory" | grep '^replay-nonce:' | sed -e 's/replay-nonce:[[:space:]]*//' | tr -cd 'A-Za-z0-9_-'
+  curl -m 5 --trace-ascii errNonce -sI "$acmeServiceURL/directory" | grep -i '^replay-nonce:' | sed -e 's/replay-nonce:[[:space:]]*//i' | tr -cd 'A-Za-z0-9_-'
 }
 
 function genJWK () { # openssl spits out modulus as a hex string and I need a base64. That's some jiggery pokery just look at those backslashes!
@@ -223,9 +223,11 @@ function getHTTPHeader () { # Gets a header $1 from file $2 or stdin if $2 not s
   if [ "$2" ]
   then
     ! [ -r "$2" ] && errorIn "Cannot read file '$2' to get Header '$1'" && return 1
-    sed -e 's/\r$//' "$2" | awk '/^[[:space:]]/ {if(a=1) {sub(/^[[:space:]]+/, ""); printf("%s",$0) } a=0} /^'$Header':[[:space:]]/ {$1="";sub(/^[[:space:]]+/, "");printf("%s",$0);a=1}'
+#    sed -e 's/\r$//' "$2" | awk '/^[[:space:]]/ {if(a=1) {sub(/^[[:space:]]+/, ""); printf("%s",$0) } a=0} /^'$Header':[[:space:]]/i {$1="";sub(/^[[:space:]]+/, "");printf("%s",$0);a=1}'
+    sed -e 's/\r$//' "$2" | awk 'BEGIN {IGNORECASE=1} /^[^[:space:]]/ {if(a==1)printf("\n");a=0} /^[[:space:]]/ {if(a==1){sub(/^[[:space:]]+/, "");printf("%s",$0)}}  /^'$Header':/ {$1="";sub(/^[[:space:]]+/, "");printf($0); a=1}'
   else
-    sed -e 's/\r$//' "$2" | awk '/^[[:space:]]/ {if(a=1) {sub(/^[[:space:]]+/, ""); printf("%s",$0) } a=0} /^'$Header':[[:space:]]/ {$1="";sub(/^[[:space:]]+/, "");printf("%s",$0);a=1}'
+#    sed -e 's/\r$//' "$2" | awk '/^[[:space:]]/ {if(a=1) {sub(/^[[:space:]]+/, ""); printf("%s",$0) } a=0} /^'$Header':[[:space:]]/i {$1="";sub(/^[[:space:]]+/, "");printf("%s",$0);a=1}'
+    sed -e 's/\r$//' | awk 'BEGIN {IGNORECASE=1} /^[^[:space:]]/ {if(a==1)printf("\n");a=0} /^[[:space:]]/ {if(a==1){sub(/^[[:space:]]+/, "");printf("%s",$0)}}  /^'$Header':/ {$1="";sub(/^[[:space:]]+/, "");printf($0); a=1}'
   fi
 }
 
@@ -251,9 +253,21 @@ function isRootCA () {
   [ `getCertHash "$1"` = `getIssuerHash "$1"` ]
 }
 
+function getSANExt () { # Help older openssl along a bit with extensions
+  openssl x509 -in "$1" -noout -ext subjectAltName 2>/dev/null && return
+  INDENT=`openssl x509 -in "$1" -noout -text |grep 'X509v3 Subject Alternative Name:' | sed -e 's/\([[:space:]]*\)[^[:space:]].*/\1/'`
+  openssl x509 -in "$1" -noout -text |grep -A999 'X509v3 Subject Alternative Name:' |grep -v "${INDENT}X509v3 Subject Alternative Name:" | sed -n "/^${a}[^[:space:]]/q;p" | grep -v '^$'
+}
+
+function getAIAExt () { # Help older openssl along a bit with extensions
+  openssl x509 -in "$1" -noout -ext authorityInfoAccess 2>/dev/null && return
+  INDENT=`openssl x509 -in "$1" -noout -text |grep 'Authority Information Access:' | sed -e 's/\([[:space:]]*\)[^[:space:]].*/\1/'`
+  openssl x509 -in "$1" -noout -text |grep -A999 'Authority Information Access:' |grep -v "${INDENT}Authority Information Access" | sed -n "/^${a}[^[:space:]]/q;p" |grep -v '^$'
+}
+
 function getIssuerURL () { # Function to get Issuer based upon authorityInfoAccess: getIssuerURL <pathToCert>
-  openssl x509 -in "$1" -noout -ext authorityInfoAccess |grep '^[[:space:]]*CA Issuers - URI:http[a-zA-Z0-9/_.:-]*$' |sed -e 's/^[[:space:]]*CA Issuers - URI://'
-  return ${PIPESTATUS[0]}
+  getAIAExt "$1" |grep '^[[:space:]]*CA Issuers - URI:http[a-zA-Z0-9/_.:-]*$' |sed -e 's/^[[:space:]]*CA Issuers - URI://'
+  [ ${PIPESTATUS[0]} -eq 0 ] && return
 }
 
 
@@ -278,7 +292,7 @@ function getCertByURL () {
 
 function getCertPrimaryName () {
   CertName="`openssl x509 -in "$1" -noout -nameopt multiline -subject 2>/dev/null | grep '^[[:space:]]*commonName[[:space:]]*=[[:space:]]*[a-zA-Z0-9_-]*\.[a-zA-Z0-9_.-]*$' |head -n 1|sed -e 's/^[[:space:]]*commonName[[:space:]]*=[[:space:]]*//'`"
-  [ "$CertName" ] || CertName="`openssl x509 -in "$1" -noout -ext subjectAltName 2>/dev/null | grep '^[[:space:]]*DNS:[a-zA-Z0-9_-]*\.[a-zA-Z0-9_.-]*$' |head -n 1 |sed -e 's/^[[:space:]]*DNS://'`"
+  [ "$CertName" ] || CertName="`getSANExt "$1" | grep '^[[:space:]]*DNS:[a-zA-Z0-9_-]*\.[a-zA-Z0-9_.-]*$' |head -n 1 |sed -e 's/^[[:space:]]*DNS://'`"
   [ "$CertName" ] || Certname=`getCertHash "$1" |grep '^[0-9a-f]\{8\}$'`
   [ "$CertName" ] && echo "$CertName" || return 1
 }
@@ -456,7 +470,7 @@ function checkNames () {
   do
     echo "$a" | checkFQDN || return 127
     openssl x509 -in "$MyCERTPATH" -noout || return 127
-    openssl x509 -in "$MyCERTPATH" -noout -ext subjectAltName | sed -e 's/[[:space:],]/\n/g' |grep -q "^DNS:$a$" && continue
+    getSANExt "$MyCERTPATH" | sed -e 's/[[:space:],]/\n/g' |grep -q "^DNS:$a$" && continue
     openssl x509 -in "$MyCERTPATH" -noout -nameopt multiline -subject | grep -q "^[[:space:]]*commonName[[:space:]]*=[[:space:]]*$a$" && continue
     debug "checkNames: Certificate not valid for $a"
     OK=1
@@ -471,7 +485,7 @@ function getNames () {
   openssl x509 -in "$1" -noout || return 127
   CN=`openssl x509 -in "$1" -noout -nameopt multiline -subject | grep "^[[:space:]]*commonName[[:space:]]*=[[:space:]]*[a-zA-Z0-9.-]*[[:space:]]*$" |sed -e 's/^[[:space:]]*commonName[[:space:]]*=[[:space:]]*\([a-zA-Z0-9.-]*\)[[:space:]]*$/\1/'`
   echo "$CN" |checkFQDN || CN=""
-  ( echo "$CN" ; openssl x509 -in "$1" -noout -ext subjectAltName | sed -e 's/[[:space:],]/\n/g' |grep "^DNS:[a-zA-Z0-9.-]*$" |sed -e 's/DNS://' |grep -v "^$CN$" )  | grep .
+  ( echo "$CN" ; getSANExt "$1" | sed -e 's/[[:space:],]/\n/g' |grep "^DNS:[a-zA-Z0-9.-]*$" |sed -e 's/DNS://' |grep -v "^$CN$" )  | grep .
 }
 
 # Check Date of $1 certificate
