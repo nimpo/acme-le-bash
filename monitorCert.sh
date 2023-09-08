@@ -3,9 +3,14 @@ THISSCRIPT=`readlink -f $0`
 THISDIR=`dirname $THISSCRIPT`
 
 # This is the call to execute the certificate request
+if [ "`type -t reqfunction`" != "function" ]
+then
 function reqfunction () {
-  $THISDIR/acme.sh -C $1 -k $2 $VERBOSE -DAWS -P personalDNS -d -e dr.mike.jones@gmail.com ${FQDNS[@]}
+  echo 'This is an example acme.sh call. To set this redefine the function reqfunction, and if callinc from a separate script "export -f" it.'
+  echo "$THISDIR/acme.sh -C $1 -k $2 -V -d -H -e test@example.com ${FQDNS[@]}"
+  type reqfunction
 } 
+fi
 
 ### Load in function safely
 [ "`sha1sum $THISDIR/acme.functions.sh |sed -e 's/ .*//'`" != "a83de5500d592da15496117b24cf666c7675c6b8" ] && echo "Can't find valid acme.functions.sh" && exit 1
@@ -34,8 +39,8 @@ do
 done
 
 curl -w5 -Iv https://letsencrypt.org >/dev/null 2>&1 || errorIn "Cannot reach letsencrypt.org via https. Use environment https_proxy or -proxy option"
-checkFile "$CERTPATH" || errorIn "Cannot write to $CERTPATH"
-checkFile "$KEYPATH" || errorIn "Cannot write to $KEYPATH"
+checkFile "$CERTPATH" || errorIn "Cannot write to ${CERTPATH:-<NULL>}"
+checkFile "$KEYPATH" || errorIn "Cannot write to ${KEYPATH:-<NULL>}"
 [ -d "$TRUSTPATH" ] || errorIn "Trust store required"
 [ ${#ERRORS[@]} -gt 0 ] && echo "Usage $THISSCRIPT -cert <fullPathToCert> -key <fullPathToKey> [-capath /etc/ssl/certs] [-v|-d|-D|-c] [-proxy <URL>] <FQDN>..." && echo "v=verbose, d=debug, D=Dryrun, c=Copy FQDNs in cert."
 
@@ -139,6 +144,7 @@ function certkeychecks () {
 # Get Cert from TLS, check it and crosscheck with local
 function remotechecks () { # $1 is localcert
   local Fails=0
+  [ ! -e "$1" ] && echo "No cert to check" && return 1
   for LOCALCERT in $1
   do
     shift
