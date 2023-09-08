@@ -3,7 +3,7 @@
 THISSCRIPT=`readlink -f $0`
 THISDIR=`dirname $THISSCRIPT`
 ### Load in function safely
-[ "`sha1sum $THISDIR/acme.functions.sh |sed -e 's/ .*//'`" != "a83de5500d592da15496117b24cf666c7675c6b8" ] && echo "Can't find valid acme.functions.sh" && exit 1
+[ "`sha1sum $THISDIR/acme.functions.sh |sed -e 's/ .*//'`" != "4bbf04ded7c8ed5b1f2e66c9d61166bcc8e3fe59" ] && echo "Can't find valid acme.functions.sh" && exit 1
 . $THISDIR/acme.functions.sh
 
 
@@ -159,8 +159,13 @@ done
 [ ${#domains[@]} -eq 0 ] && errorIn "Expecting at least one FQDN"
 
 #---------------------------- Get DNS Zone Roots --- used in dns-01
+
 if [ "$useDNS" ]
 then
+  
+  verbose "Check I can reach 8.8.8.8 for DNS query"
+  dig @8.8.8.8 letsencrypt.org +tries=1 +time=5 >/dev/null 2>&1 && GGLDNS="yes"
+
   declare -A Zones=()
   declare -A ZoneIDs=()
   for domain in ${domains[@]}
@@ -168,7 +173,12 @@ then
     D="$domain"
     while echo "$D"|grep -q '\.' 
     do 
-      dig "$D" soa |grep "^$D\.[[:space:]]" |grep -F "$D." |grep -q '[[:space:]]SOA[[:space:]]' && Zones[$domain]=$D && ZoneIDs[$D]="" && verbose "got Zone $D for $domain" && break # Zones: map FQDN -> Root ; ready ZoneIDs: Roots -> ""
+      if [ "$GGLDNS" ]
+      then
+        dig @8.8.8.8 "$D" soa |grep "^$D\.[[:space:]]" |grep -F "$D." |grep -q '[[:space:]]SOA[[:space:]]' && Zones[$domain]=$D && ZoneIDs[$D]="" && verbose "got Zone $D for $domain" && break # Zones: map FQDN -> Root ; ready ZoneIDs: Roots -> ""
+      else
+        dig "$D" soa |grep "^$D\.[[:space:]]" |grep -F "$D." |grep -q '[[:space:]]SOA[[:space:]]' && Zones[$domain]=$D && ZoneIDs[$D]="" && verbose "got Zone $D for $domain" && break # Zones: map FQDN -> Root ; ready ZoneIDs: Roots -> ""
+      fi 
       D=`echo "$D"|sed -e 's/^[a-z0-9-]*\.//'`
     done
   done
@@ -384,7 +394,7 @@ then                        # TXT in _acme-challenge.<YOUR_DOMAIN> "..."
     verbose "Asking AWS to add the following DNS record:" "_acme-challenge.$domain 5 IN TXT \"$Token\"" 
   # lookup ZoneIDs
     zoneID="${ZoneIDs["${Zones[$domain]:-"X"}"]}" # Nested lookup we use substitute X to avoid unredirectable error
-    [ "$zoneID" = "" ] && errorIn "Failed to lookup AWS ZoneId for $domain" && continue
+    [ "$zoneID" = "" ] && errorIn "Failed to lookup AWS ZoneId for domain where domain=$domain and subsequently "'${Zones[$domain]}'"=${Zones[$domain]}" && continue
     zoneChanges["$zoneID"]=${zoneChanges["$zoneID"]}'{"Action":"UPSERT","ResourceRecordSet":{"Name":"_acme-challenge.'$domain'","Type":"TXT","TTL":5,"ResourceRecords":[{"Value":"\"'$Token'\""}]}},'
   done
   checkNBale
@@ -407,11 +417,10 @@ then                        # TXT in _acme-challenge.<YOUR_DOMAIN> "..."
   done
   checkNBale
 
-  verbose "Check I can reach 8.8.8.8 for DNS query"
 
 # At this point AWS has queued a change
 
-  dig @8.8.8.8 letsencrypt.org +tries=1 +time=5 >/dev/null 2>&1 && GGLDNS="yes"
+#  dig @8.8.8.8 letsencrypt.org +tries=1 +time=5 >/dev/null 2>&1 && GGLDNS="yes"
   i=1
   for j in 1 2 4 8 16 32 64 128 256
   do

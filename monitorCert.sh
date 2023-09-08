@@ -13,7 +13,7 @@ function reqfunction () {
 fi
 
 ### Load in function safely
-[ "`sha1sum $THISDIR/acme.functions.sh |sed -e 's/ .*//'`" != "a83de5500d592da15496117b24cf666c7675c6b8" ] && echo "Can't find valid acme.functions.sh" && exit 1
+[ "`sha1sum $THISDIR/acme.functions.sh |sed -e 's/ .*//'`" != "4bbf04ded7c8ed5b1f2e66c9d61166bcc8e3fe59" ] && echo "Can't find valid acme.functions.sh" && exit 1
 . $THISDIR/acme.functions.sh
 
 #System environment

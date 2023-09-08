@@ -190,7 +190,7 @@ function Dgst () {
 function getNonce () {
 ###OLD###  curl -m 5 -sI "$acmeServiceURL/directory" | grep '^Replay-Nonce:' | sed -e 's/Replay-Nonce:[[:space:]]*//' | tr -cd 'A-Za-z0-9_-'
 #Should probably use ${directory[newNonce]}
-  curl -m 5 --trace-ascii errNonce -sI "$acmeServiceURL/directory" | grep -i '^replay-nonce:' | sed -e 's/replay-nonce:[[:space:]]*//i' | tr -cd 'A-Za-z0-9_-'
+  curl -m 5 --trace-ascii errNonce -sI "$acmeServiceURL/directory" | tee lastnonceresp | grep -i '^replay-nonce:' | sed -e 's/replay-nonce:[[:space:]]*//i' | tr -cd 'A-Za-z0-9_-'
 }
 
 function genJWK () { # openssl spits out modulus as a hex string and I need a base64. That's some jiggery pokery just look at those backslashes!
@@ -551,9 +551,10 @@ function checkCertChain () {
 #  getServerCert <servername> [<IPaddr>]
 #
 function getServerCert () {
-  SERVER="${2:-$1}"
-  debug "Obtaining TSL Cert for host: $SERVER at $1:443"
-  echo | timeout 5 openssl s_client -servername "$SERVER" -showcerts -connect "$1:443" 2>/dev/null |awk 'BEGIN {a=0;n=0} /^-----BEGIN CERTIFICATE-----$/ {a=1;n++} {if (a==1) print $0}  /^-----END CERTIFICATE-----$/ {a=0} END {if(!n)exit(1)}'
+  SERVER="echo ${2:-$1} |sed -e 's/^\([^:]*\).*/\1/'"
+  CONNECTSTR=`echo $1 |sed -e 's/^\([^:]*\)$/\1:443/'`
+  debug "Obtaining TSL Cert for host: $SERVER at $CONNECTSTR"
+  echo | timeout 5 openssl s_client -servername "$SERVER" -showcerts -connect "$CONNECTSTR" 2>/dev/null |awk 'BEGIN {a=0;n=0} /^-----BEGIN CERTIFICATE-----$/ {a=1;n++} {if (a==1) print $0}  /^-----END CERTIFICATE-----$/ {a=0} END {if(!n)exit(1)}'
 }
 
 # Check file is formatted PEM, DER or concatenated PEM
