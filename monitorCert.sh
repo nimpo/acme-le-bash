@@ -2,6 +2,19 @@
 THISSCRIPT=`readlink -f $0`
 THISDIR=`dirname $THISSCRIPT`
 
+#System environment
+PATH="/bin:/usr/bin"
+declare -a FQDNS=()
+TRUSTPATH="/etc/ssl/certs" # Default system path
+RENEWAL=28
+
+# Set variables here if you like
+#CERTPATH=<PATH TO WHERE CERT IS TO GO>
+#KEYPATH=<PATH TO WHERE KEY IS TO GO>
+#FQDNS+=("webserver.example.com")
+#PORT="443"
+#COPY="Yes"
+
 # This is the call to execute the certificate request
 if [ "`type -t reqfunction`" != "function" ]
 then
@@ -16,13 +29,6 @@ fi
 [ "`sha1sum $THISDIR/acme.functions.sh |sed -e 's/ .*//'`" != "4bbf04ded7c8ed5b1f2e66c9d61166bcc8e3fe59" ] && echo "Can't find valid acme.functions.sh" && exit 1
 . $THISDIR/acme.functions.sh
 
-#System environment
-PATH="/bin:/usr/bin"
-
-declare -a FQDNS=()
-TRUSTPATH="/etc/ssl/certs" # Default system path
-RENEWAL=28
-
 while [ "$1" ]
 do
   case "$1" in
@@ -32,17 +38,22 @@ do
     -v) VERBOSE="-V" ; shift ;;
     -d) DEBUG="Yes" ; shift ;;
     -D) DRYRUN="Yes" ; shift ;;
+    -F) FORCE="Yes" ; shift ;;
+    -P) shift ; PORT="" ; shift ;;
     -c) COPY="Yes" ; [ ${#FQDNS[@]} -gt 1 ] && errorIn "copy (-c) is no use if multiple FQDNS are also specified" ; shift ;;
     -proxy) shift ; export http_proxy="$1" && export=https_proxy="$1" ; shift ;;
     *) echo "$1" | checkFQDN && FQDNS+=($1) || errorIn "$1 not an FQDN" ; [ "$COPY" ] && [ ${#FQDNS[@]} -gt 1 ] && errorIn "copy (-c) is no use if multiple FQDNS are also specified"; shift ;;
   esac
 done
 
+[ "$PORT" ] || PORT="443"
+
 curl -w5 -Iv https://letsencrypt.org >/dev/null 2>&1 || errorIn "Cannot reach letsencrypt.org via https. Use environment https_proxy or -proxy option"
-checkFile "$CERTPATH" || errorIn "Cannot write to ${CERTPATH:-<NULL>}"
-checkFile "$KEYPATH" || errorIn "Cannot write to ${KEYPATH:-<NULL>}"
+[ ${#FQDNS[@]} -gt 0 ] || [ -e "$CERTPATH" ] || errorIn "FQDN or Cert to copy needed"
+checkFile "$CERTPATH" || errorIn "Cannot write to $CERTPATH"
+checkFile "$KEYPATH" || errorIn "Cannot write to $KEYPATH"
 [ -d "$TRUSTPATH" ] || errorIn "Trust store required"
-[ ${#ERRORS[@]} -gt 0 ] && echo "Usage $THISSCRIPT -cert <fullPathToCert> -key <fullPathToKey> [-capath /etc/ssl/certs] [-v|-d|-D|-c] [-proxy <URL>] <FQDN>..." && echo "v=verbose, d=debug, D=Dryrun, c=Copy FQDNs in cert."
+[ ${#ERRORS[@]} -gt 0 ] && echo "Usage $THISSCRIPT -cert <fullPathToCert> -key <fullPathToKey> [-capath /etc/ssl/certs] [-v|-F|-d|-D|-c] [-proxy <URL>] <FQDN>..." && echo "v=verbose, F=force, d=debug, D=Dryrun, c=Copy FQDNs in cert."
 
 checkNBale
 
@@ -71,7 +82,7 @@ trap finish EXIT
 # Copying cert names if copy requested on commandline
 if [ "$COPY" ]
 then
-  getServerCert "${FQDNS[0]}" > tmpcert.pem 2>/dev/null || cp $CERTPATH tmpcert.pem 2>/dev/null
+  getServerCert "${FQDNS[0]}:$PORT" > tmpcert.pem 2>/dev/null || cp $CERTPATH tmpcert.pem 2>/dev/null
   FQDNS=(`getNames tmpcert.pem`) || errorIn "Cannot copy Names from any existing certificates"
   echo "changing FQDNs to ${FQDNS[@]}"
 fi
@@ -96,7 +107,7 @@ function localcertchecks () { # $1 is cert $2... are FQDNS to check against
   do
     shift
     debug "check '$CERT' exists"
-    printf "%-60s" "Checking cert is on filesystem"
+    printf "%-60s" "Checking cert "$CERT" is on filesystem"
     ! [ -e "$CERT" ] && echo " [ FAIL ]" && warningIn -q "Cert: "$CERT" does not exist (yet)" && continue || echo " [  OK  ]"
 
     debug "checkNames $CERT $@"
@@ -153,10 +164,10 @@ function remotechecks () { # $1 is localcert
       let Fails++
       debug "curl -k -m5 'https://$fqdn' >/dev/null 2>&1"
       printf "%-60s" "Checking server at $fqdn functions"
-      ! curl -k -m5 https://$fqdn >/dev/null 2>&1 && echo " [ FAIL ]" && errorIn "$fqdn has no https server on 443" && continue || echo " [  OK  ]"
+      ! curl -k -m5 https://$fqdn:$PORT >/dev/null 2>&1 && echo " [ FAIL ]" && errorIn "$fqdn has no https server on 443" && continue || echo " [  OK  ]"
       debug "getServerCert '$fqdn' > '${fqdn}.chain.pem'"
       printf "%-60s" "Pulling certificate from https://$fqdn"
-      ! getServerCert "$fqdn" > "${fqdn}.chain.pem" && echo " [ FAIL ]" && warningIn -q "Cannot retrieve certificate chain from https://$fqdn" && continue || echo " [  OK  ]"
+      ! getServerCert "$fqdn:$PORT" > "${fqdn}.chain.pem" && echo " [ FAIL ]" && warningIn -q "Cannot retrieve certificate chain from https://$fqdn:$PORT" && continue || echo " [  OK  ]"
       debug "Do Cert Generic checks '${fqdn}.chain.pem'"
       echo
       echo " --- Checking cert fetched from $fqdn ---"
@@ -177,7 +188,23 @@ function remotechecks () { # $1 is localcert
 #  printf "%-60s" "Check pulled certificate matches installed certificate"
 #  ! checkCertsMatch "$1" "$2" && echo "[ FAIL ]" && warningIn "$1 does not match Certificate at '$2'" && return 1 || echo "[  OK  ]"
 #}
-if remotechecks $CERTPATH ${FQDNS[@]}
+if [ "$FORCE" = "Yes" ]
+then
+  echo FORCE Cert getting 
+  FQDNSstr="${FQDNS[@]}"
+  declare -f reqfunction | grep THISDIR |sed -e 's?\$THISDIR?'"$THISDIR?" -e 's/\$VERBOSE/'"$VERBOSE/"  -e 's/\$1/'"newcert.pem/" -e 's/\$2/'"newkey.pem/" -e 's/\${FQDNS\[@\]}/'"$FQDNSstr/"
+  [ "$DRYRUN" ] || reqfunction newcert.pem newkey.pem
+  if localcertchecks newcert.pem ${FQDNS[@]} && certkeychecks newcert.pem newkey.pem
+  then
+    cp -p newcert.pem $CERTPATH
+    cp -p newkey.pem  $KEYPATH
+    certkeychecks "$CERTPATH" "$KEYPATH" && echo "WEBSERVER RESTART REQUIRED!!"
+#    certkeychecks "$CERTPATH" "$KEYPATH" && sudo service apache2 restart
+  else
+    errorIn "Failed to get new certs"
+    checkNBale
+  fi
+elif remotechecks $CERTPATH ${FQDNS[@]}
 then
   echo REMOTE CERTS OK No action
 else
