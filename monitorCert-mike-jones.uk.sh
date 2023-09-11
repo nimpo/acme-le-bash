@@ -11,14 +11,18 @@ RENEWAL=28
 # Set variables here if you like
 #CERTPATH=<PATH TO WHERE CERT IS TO GO>
 #KEYPATH=<PATH TO WHERE KEY IS TO GO>
-#FQDNS+=("webserver.example.com")
+FQDNS+=("mike-jones.me.uk")
 #PORT="443"
-#COPY="Yes"
+COPY="Yes"
+VERBOSE="-V"
+CERTPATH="/var/www/etc/mike-jones.me.uk.crt"
+KEYPATH="/var/www/etc/mike-jones.me.uk.key"
 
 # This is the call to execute the certificate request
 if [ "`type -t reqfunction`" != "function" ]
 then
 function reqfunction () {
+  "$THISDIR/acme.sh" -C "$1" -k "$2" "$VERBOSE" -HDocRoot /var/www/vhosts/mikejones/html -e dr.mike.jones@gmail.com ${FQDNS[@]}
   echo 'This is an example acme.sh call. To set this redefine the function reqfunction, and if callinc from a separate script "export -f" it.'
   echo "$THISDIR/acme.sh -C $1 -k $2 -V -d -H -e test@example.com ${FQDNS[@]}"
   type reqfunction

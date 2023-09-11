@@ -3,7 +3,7 @@
 THISSCRIPT=`readlink -f $0`
 THISDIR=`dirname $THISSCRIPT`
 ### Load in function safely
-[ "`sha1sum $THISDIR/acme.functions.sh |sed -e 's/ .*//'`" != "4bbf04ded7c8ed5b1f2e66c9d61166bcc8e3fe59" ] && echo "Can't find valid acme.functions.sh" && exit 1
+[ "`sha1sum $THISDIR/acme.functions.sh |sed -e 's/ .*//'`" != "0328feb734f74b61d478558c9587a3bf11171db4" ] && echo "Can't find valid acme.functions.sh" && exit 1
 . $THISDIR/acme.functions.sh
 
 
