@@ -551,7 +551,7 @@ function checkCertChain () {
 #  getServerCert <servername> [<IPaddr>]
 #
 function getServerCert () {
-  SERVER="echo ${2:-$1} |sed -e 's/^\([^:]*\).*/\1/'"
+  SERVER=`echo ${2:-$1} |sed -e 's/^\([^:]*\).*/\1/'`
   CONNECTSTR=`echo $1 |sed -e 's/^\([^:]*\)$/\1:443/'`
   debug "Obtaining TSL Cert for host: $SERVER at $CONNECTSTR"
   echo | timeout 5 openssl s_client -servername "$SERVER" -showcerts -connect "$CONNECTSTR" 2>/dev/null |awk 'BEGIN {a=0;n=0} /^-----BEGIN CERTIFICATE-----$/ {a=1;n++} {if (a==1) print $0}  /^-----END CERTIFICATE-----$/ {a=0} END {if(!n)exit(1)}'
