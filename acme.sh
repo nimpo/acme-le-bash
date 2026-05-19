@@ -3,7 +3,7 @@
 THISSCRIPT=`readlink -f $0`
 THISDIR=`dirname $THISSCRIPT`
 ### Load in function safely
-[ "`sha1sum $THISDIR/acme.functions.sh |sed -e 's/ .*//'`" != "0328feb734f74b61d478558c9587a3bf11171db4" ] && echo "Can't find valid acme.functions.sh" && exit 1
+[ "`sha1sum $THISDIR/acme.functions.sh |sed -e 's/ .*//'`" != "857c8cd40aba83804363af11377c85e779e0598d" ] && echo "Can't find valid acme.functions.sh" && exit 1
 . $THISDIR/acme.functions.sh
 
 
@@ -170,9 +170,9 @@ then
   declare -A ZoneIDs=()
   for domain in ${domains[@]}
   do
-    D="$domain"
+    D="`echo $domain | sed -e ''s/\*\.//`" 
     while echo "$D"|grep -q '\.' 
-    do 
+    do
       if [ "$GGLDNS" ]
       then
         dig @8.8.8.8 "$D" soa |grep "^$D\.[[:space:]]" |grep -F "$D." |grep -q '[[:space:]]SOA[[:space:]]' && Zones[$domain]=$D && ZoneIDs[$D]="" && verbose "got Zone $D for $domain" && break # Zones: map FQDN -> Root ; ready ZoneIDs: Roots -> ""
@@ -251,7 +251,11 @@ checkNBale
 #---------------------------------------------------------------------- Now we talk to Acme
 # First probe service to get endpoints:
 declare -A directory
+count=0
 curl -m 5 -o Response.ret -D ResponseHead.ret -s "$acmeServiceURL/directory"
+cp -p Response.ret Response.ret.$count
+cp -p ResponseHead.ret ResponseHead.ret.$count
+let count+=1
 directory[termsOfService]=`jq -r '.meta.termsOfService' Response.ret |filterHTTP`
 directory[newAccount]=`jq -r '.newAccount' Response.ret |filterHTTP`
 directory[newNonce]=`jq -r '.newNonce' Response.ret |filterHTTP`
@@ -273,6 +277,10 @@ then
   SignedJSONPayload=`genJWS '{"termsOfServiceAgreed":true,"contact":["mailto:'$emailAddress'"]}' "$JWS" "${directory[newAccount]}"`
   # LE v2 acme needs "Content-Type: application/jose+json" header or else!
   curl -m 5 -s -H "Content-Type: application/jose+json" -o Response.ret -D ResponseHead.ret -d "$SignedJSONPayload" "${directory[newAccount]}" ## New Endpoint in v2 we looked it up this time
+  cp -p Response.ret Response.ret.$count
+  cp -p ResponseHead.ret ResponseHead.ret.$count
+  let count+=1
+
 #used in JWS json web signature
 ##########  KID=`awk '/^Location:[[:space:]]/ {print $2}' ResponseHead.ret | filterHTTP`
   ReplayNonce=`getHTTPHeader replay-nonce ResponseHead.ret` # No need to get new nonce for layer #!!!!!!!!!!!!!!!!!!!!!!
@@ -311,6 +319,9 @@ reqdomains=`echo -n '{"identifiers":[' ; printf "{\"type\":\"dns\",\"value\":\"%
 SignedJSONPayload=`genJWS "$reqdomains" "$JWK" "${directory[newOrder]}" "$ReplayNonce"`
 # LE v2 acme needs "Content-Type: application/jose+json" header or else!
 curl -m 5 -s -H "Content-Type: application/jose+json" -o Response.ret -D ResponseHead.ret -d "$SignedJSONPayload" "${directory[newOrder]}"
+cp -p Response.ret Response.ret.$count
+cp -p ResponseHead.ret ResponseHead.ret.$count
+let count+=1
 
 ORDERURL=`getHTTPHeader location ResponseHead.ret | filterHTTP` || errorIn "No Order URL for ${directory[newOrder]}"
 
@@ -344,6 +355,10 @@ do
   verbose "In domain loop for $FQDN"
   SignedJSONPayload=`genJWS "" "$JWK" "${authorizations[$FQDN]}"  "$ReplayNonce"`
   curl -m 5 -s -H "Content-Type: application/jose+json" -o Response.ret -D ResponseHead.ret -d "$SignedJSONPayload" "${authorizations[$FQDN]}" || errorIn "Cannot get token for $FQDN" 
+  cp -p Response.ret Response.ret.$count
+  cp -p ResponseHead.ret ResponseHead.ret.$count
+  let count+=1
+
   DNSToken[$FQDN]=`jq -r '.challenges[]| select(.type == "dns-01")|.token' Response.ret |grep '^[A-Za-z0-9_-]\{1,\}$'` || warningIn "unable to get dns-01 token for $FQDN"
   HTTPToken[$FQDN]=`jq -r '.challenges[]| select(.type == "http-01")|.token' Response.ret |grep '^[A-Za-z0-9_-]\{1,\}$'` || warningIn "unable to get http-01 token for $FQDN"
   TLSALPNToken[$FQDN]=`jq -r '.challenges[]| select(.type == "tls-alpn-01")|.token' Response.ret |grep '^[A-Za-z0-9_-]\{1,\}$'` || warningIn "unable to get tls-alpn-01 token for $FQDN"
@@ -390,12 +405,13 @@ then                        # TXT in _acme-challenge.<YOUR_DOMAIN> "..."
   declare -A zoneChanges=()
   for domain in ${domains[@]}
   do
+    norm_domain=`echo $domain | sed -e 's/^\*\.//'` # Remove any incidental leading *. incase of wildcard
     Token=`echo -n "${DNSToken[$domain]}.$JWKDgstB64" |Dgst |B64`
-    verbose "Asking AWS to add the following DNS record:" "_acme-challenge.$domain 5 IN TXT \"$Token\"" 
+    verbose "Asking AWS to add the following DNS record:" "_acme-challenge.$domain IN TXT "'"'"$Token"'"'" " 
   # lookup ZoneIDs
     zoneID="${ZoneIDs["${Zones[$domain]:-"X"}"]}" # Nested lookup we use substitute X to avoid unredirectable error
     [ "$zoneID" = "" ] && errorIn "Failed to lookup AWS ZoneId for domain where domain=$domain and subsequently "'${Zones[$domain]}'"=${Zones[$domain]}" && continue
-    zoneChanges["$zoneID"]=${zoneChanges["$zoneID"]}'{"Action":"UPSERT","ResourceRecordSet":{"Name":"_acme-challenge.'$domain'","Type":"TXT","TTL":5,"ResourceRecords":[{"Value":"\"'$Token'\""}]}},'
+    zoneChanges["$zoneID"]=${zoneChanges["$zoneID"]}'{"Action":"UPSERT","ResourceRecordSet":{"Name":"_acme-challenge.'$norm_domain'","Type":"TXT","TTL":5,"ResourceRecords":[{"Value":"\"'$Token'\""}]}},'
   done
   checkNBale
   for zoneChange in ${!zoneChanges[@]} ##################################
@@ -430,16 +446,17 @@ then                        # TXT in _acme-challenge.<YOUR_DOMAIN> "..."
     for domain in ${domains[@]}
     do
       Token=`echo -n ${DNSToken[$domain]}.$JWKDgstB64 |Dgst |B64`
+      norm_domain=`echo $domain | sed -e 's/^\*\.//'` # Remove any incidental leading *. incase of wildcard AFTER DNSTokenLookup!
       if [ "$GGLDNS" ] 
       then 
-        verbose "Checking 8.8.8.8 for _acme-challenge.$domain TXT record"
-        TXT=`dig @8.8.8.8 "_acme-challenge.$domain" TXT +short`
+        verbose "Checking 8.8.8.8 for _acme-challenge.$norm_domain TXT record"
+        TXT=`dig @8.8.8.8 "_acme-challenge.$norm_domain" TXT +short`
       else
-        verbose "Checking local nameserver for _acme-challenge.$domain TXT record"
-        TXT=`dig "_acme-challenge.$domain" TXT +short`
+        verbose "Checking local nameserver for _acme-challenge.$norm_domain TXT record"
+        TXT=`dig "_acme-challenge.$norm_domain" TXT +short`
       fi
       [ "$TXT" != "\"$Token\"" ] && TXTtest="fail"
-      verbose "...got TXT=$TXT"
+      verbose "...got TXT=$TXT expecting $Token for $norm_domain from ${DNSToken[$domain]}"
       sleep 1
     done
     [ "$TXTtest" ] || break
@@ -470,12 +487,19 @@ do
   challengeStatus="pending"
   if [ "$useDNS" ]
   then
+    verbose "DNSURL for domain=$domain is ${DNSURL[$domain]}"
     SignedJSONPayload=`genJWS "{}" "$JWK" "${DNSURL[$domain]}" "$ReplayNonce"`
     curl -m 5 -s -H "Content-Type: application/jose+json" -o Response.ret -D ResponseHead.ret -d "$SignedJSONPayload" "${DNSURL[$domain]}" || errorIn "Cannot trigger Checks $domain"
+    cp -p Response.ret Response.ret.$count
+    cp -p ResponseHead.ret ResponseHead.ret.$count
+    let count+=1
     challengeStatus=`jq '.status' Response.ret | sed -e 's/"\([^"]*\)"/\1/'`
   else
     SignedJSONPayload=`genJWS "{}" "$JWK" "${HTTPURL[$domain]}" "$ReplayNonce"`
     curl -m 5 -s -H "Content-Type: application/jose+json" -o Response.ret -D ResponseHead.ret -d "$SignedJSONPayload" "${HTTPURL[$domain]}" || errorIn "Cannot trigger Checks $domain"
+    cp -p Response.ret Response.ret.$count
+    cp -p ResponseHead.ret ResponseHead.ret.$count
+    let count+=1
     challengeStatus=`jq '.status' Response.ret | sed -e 's/"\([^"]*\)"/\1/'`
   fi
 done
@@ -488,6 +512,9 @@ do
   sleep $i
   SignedJSONPayload=`genJWS "" "$JWK" "$ORDERURL" "$ReplayNonce"`
   curl -m 5 -s -H "Content-Type: application/jose+json" -o Response.ret -D ResponseHead.ret -d "$SignedJSONPayload" "$ORDERURL" || errorIn "Cannot check order URL for $domain" 
+  cp -p Response.ret Response.ret.$count
+  cp -p ResponseHead.ret ResponseHead.ret.$count
+  let count+=1
   challengeStatus=`jq '.status' Response.ret | sed -e 's/"\([^"]*\)"/\1/'`
 done
 [ "$challengeStatus" != "ready" ] && [ "$challengeStatus" != "valid" ] && echo "Failed to verify $domain" >&2 && exit 1
@@ -500,10 +527,16 @@ cSRB64=`openssl req -in $domains.csr -outform DER | B64`
 
 SignedJSONPayload=`genJWS '{"csr":"'$cSRB64'"}' "$JWK" "$finalize" "$ReplayNonce"`
 curl -m 5 -s -H "Content-Type: application/jose+json" -o Response.ret -D ResponseHead.ret -d "$SignedJSONPayload" "$finalize" || errorIn "Cannot check order URL for $domain" 
+cp -p Response.ret Response.ret.$count
+cp -p ResponseHead.ret ResponseHead.ret.$count
+let count+=1
 CertURL=`jq '.certificate' Response.ret |filterHTTP`
 
 SignedJSONPayload=`genJWS "" "$JWK" "$CertURL" "$ReplayNonce"`
 curl -m 5 -s -H "Content-Type: application/jose+json" -o Response.ret -D ResponseHead.ret -d "$SignedJSONPayload" "$CertURL" || errorIn "Cannot check order URL for $domain"
+cp -p Response.ret Response.ret.$count
+cp -p ResponseHead.ret ResponseHead.ret.$count
+let count+=1
 cat Response.ret > $domains.crt
 
 [ "$cALocationURI" ] && curl -s -H 'Accept: application/pkix-cert' -o cacert.der "$cALocationURI" && openssl x509 -in cacert.der -inform DER > $domains.cacerts
