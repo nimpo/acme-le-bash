@@ -3,7 +3,7 @@ THISSCRIPT=`readlink -f $0`
 THISDIR=`dirname $THISSCRIPT`
 
 #System environment
-PATH="/bin:/usr/bin"
+PATH="/bin:/usr/bin:/usr/local/bin"
 declare -a FQDNS=()
 TRUSTPATH="/etc/ssl/certs" # Default system path
 RENEWAL=28
@@ -26,7 +26,7 @@ function reqfunction () {
 fi
 
 ### Load in function safely
-[ "`sha1sum $THISDIR/acme.functions.sh |sed -e 's/ .*//'`" != "0328feb734f74b61d478558c9587a3bf11171db4" ] && echo "Can't find valid acme.functions.sh at $THISDIR/acme.functions.sh" && exit 1
+[ "`sha1sum $THISDIR/acme.functions.sh |sed -e 's/ .*//'`" != "857c8cd40aba83804363af11377c85e779e0598d" ] && echo "Can't find valid acme.functions.sh at $THISDIR/acme.functions.sh" && exit 1
 . $THISDIR/acme.functions.sh
 
 while [ "$1" ]
@@ -221,8 +221,8 @@ else
     then
       cp -p newcert.pem $CERTPATH
       cp -p newkey.pem  $KEYPATH
-#      certkeychecks "$CERTPATH" "$KEYPATH" && echo "WEBSERVER RESTART REQUIRED!!"
-      certkeychecks "$CERTPATH" "$KEYPATH" && sudo service apache2 restart
+      certkeychecks "$CERTPATH" "$KEYPATH" && echo "WEBSERVER RESTART REQUIRED!!"
+#      certkeychecks "$CERTPATH" "$KEYPATH" && sudo service apache2 restart
     else
       errorIn "Failed to get new certs"
       checkNBale

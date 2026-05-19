@@ -81,7 +81,7 @@ function warningIn () {
 }
 
 function checkFQDN () { # Check if stdin is exactly 1 FQDN < 64 chars (because 64 is convention for X.509 certificates) must have valid TLD i.e. must not be only numneric (so not to overlap IPv4)
-  tr '\n' '\r' |sed -e 's/\r$//' | grep '^[a-z0-9]\(-\{0,1\}[a-z0-9]\)*\(\.[a-z0-9]\(-\{0,1\}[a-z0-9]\)*\)*$' | grep -q '\.[0-9]*[a-z-][a-z0-9]*$' 
+  tr '\n' '\r' |sed -e 's/\r$//' | grep '^\(\*\.\)\{0,1\}[a-z0-9]\(-\{0,1\}[a-z0-9]\)*\(\.[a-z0-9]\(-\{0,1\}[a-z0-9]\)*\)*$' | grep -q '\.[0-9]*[a-z-][a-z0-9]*$' 
 }
 
 function checkStrLength () { # Check String Length $1<=Len<=$2 (default 1<=Len and Len<=64
@@ -89,7 +89,7 @@ function checkStrLength () { # Check String Length $1<=Len<=$2 (default 1<=Len a
 }
 
 function filterFQDN () { # Expect FQDN but may have bad characters pipe through this to return first FQDN or nothing also returns 0 if FQDN present
-  sed -e 's/\([a-z0-9_.-]*\)/\n\1\n/g' | grep '^[a-z0-9]\(-\{0,1\}[a-z0-9]\)*\(\.[a-z0-9]\(-\{0,1\}[a-z0-9]\)*\)\{1,\}$' | head -n 1 |grep '\.[0-9]*[a-z-][a-z0-9]*$'
+  sed -e 's/\([\(\*\.\)\{0,1\}a-z0-9_.-]*\)/\n\1\n/g' | grep '^\(\*\.\)\{0,1\}[a-z0-9]\(-\{0,1\}[a-z0-9]\)*\(\.[a-z0-9]\(-\{0,1\}[a-z0-9]\)*\)\{1,\}$' | head -n 1 |grep '\.[0-9]*[a-z-][a-z0-9]*$'
 }
 
 function filterHTTP () { # This is seriously not complete but good enough for the job here
